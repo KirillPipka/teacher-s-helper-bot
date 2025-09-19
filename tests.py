@@ -60,7 +60,11 @@ if fetch == []:
     max_table_id = 4
     empty_table_ids = [0, 1, 2, 3]
 else:
-    max_table_id = 2**math.ceil(math.log2(int(fetch[-1][0]+1)))
+    if type(fetch[-1][0]) == bytes:
+        print(fetch[-1])
+        max_table_id = 2**math.ceil(math.log2(int(fetch[-1][0][1:-1])+1))
+    else:
+        max_table_id = 2**math.ceil(math.log2(int(fetch[-1][0]+1)))
     empty_table_ids = list(set(range(max_table_id)) - set(i[0] for i in fetch))
 del (fetch)
 
@@ -162,209 +166,6 @@ async def student_tests_rsolve(callback: types.CallbackQuery,
     keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
     await callback.message.edit_text("\\".join(await get_name_by_id(*fetch[:3]))+\
                                      f"\nОт {fetch[3]}", reply_markup = keyboard)
-
-
-# Teacher functions to create tests
-# 0 - ], 1 - >, 2 - :
-
-async def teacher_tests_set_modifies(message: types.Message,
-                                    state: FSMContext) -> None | int:
-    if (await state.get_data())["logged_as"] != 1:
-        await error_occured(message, "lt", "teacher_tests_set_modifies")
-        return -1
-
-    # Getting important variables
-    additional_info = (await state.get_data())["additional_info"]
-    if additional_info["dataFor"] != 1:
-        return -2
-    test_id = additional_info["testID"]
-
-    if test_id in empty_table_ids:
-        await error_occured(message, "wu")
-        return
-
-    modify = additional_info["modify"]
-    modified = cur.execute("SELECT modif FROM tests_table WHERE testID == ?",
-                           [test_id]).fetchall()[0][0]
-    tmp_list = additional_info["text"][1:-1].split(", ")
-    tmp_list = [min(int(tmp_list[0]), int(tmp_list[1])),
-                max(int(tmp_list[0]), int(tmp_list[1]))]
-    if len(modified[modify][0]) == 2:
-        print([tmp_list[0], tmp_list[1], modified[modify][3]])
-        if tmp_list[0] == tmp_list[1] and tmp_list[0] in modified[modify][3]:
-            await message.reply("Невозможно в данной задаче использовать значение "+\
-                                f"переменной {string.ascii_letters[modify]} равное"+\
-                                " "+str(tmp_list[0])+".")
-            return
-        exclude = " \\ {"+str(modified[modify][3])[1:-1]+"}"
-    else:
-        exclude = ""
-    modified[modify][1:3] = [tmp_list[0], tmp_list[1]]
-
-    cur.execute("UPDATE tests_table SET modif = ? WHERE testID == ?",
-                [modified, test_id])
-    db.commit()
-    kb = [[types.InlineKeyboardButton(text = "Готово",
-                             callback_data = f"teacher_tests_values"+\
-                                      additional_info['operator']+str(test_id))]]
-    keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
-
-    await bot.send_message(text = f"Теперь {string.ascii_letters[modify]} ∈ "+\
-                            additional_info["text"]+exclude,
-                           chat_id = message.chat.id,
-                           reply_markup = keyboard)
-
-@router.callback_query(F.data[:20] == "teacher_tests_modify")
-@flags.permission("teacher")
-async def teacher_tests_modify(callback: types.CallbackQuery,
-                               state: FSMContext) -> None | int:
-    test_id = int(callback.data[21:callback.data.find("|")])
-
-    if test_id in empty_table_ids:
-        await error_occured(callback.message, "wu")
-        return
-
-    path1, path2, path3 = cur.execute("""SELECT path1, path2, path3 FROM
-                                         tests_table WHERE testID == ?""",
-                                                        [test_id]).fetchall()[0]
-    last_name0, last_name1, last_name2 = await get_name_by_id(path1, path2, path3)
-    modify = int(callback.data[callback.data.find("|")+1:])
-    kb = [[types.InlineKeyboardButton(text = "Вернуться",
-                             callback_data = f"teacher_tests_values_{test_id}")]]
-    keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
-    await state.update_data(additional_info = {"dataFor":   1,
-                                               "testID":    test_id,
-                                               "modify":    modify,
-                                               "messageID": callback.message.\
-                                                            message_id,
-                                               "operator":  callback.data[20]})
-
-    await callback.message.edit_text(f"{last_name0}\\{last_name1}\\{last_name2}\\"+\
-                                      f"Изменение {string.ascii_letters[modify]}\n"+\
-                                      "Вы изменяете переменную "+\
-                                      string.ascii_letters[modify]+\
-                                      "\nВведите её параметры в виде [x, y]\n"+\
-                                      "Где x и y - границы чисел\n"+\
-                                      "(х может равняться у)",
-                                     reply_markup = keyboard)
-
-@router.message(F.text[0] != "/")
-@flags.permission("teacher")
-async def teacher_tests_check_solving(message: types.Message,
-                                      state: FSMContext) -> None | int:
-    additional_info = (await state.get_data())["additional_info"]
-    if additional_info["dataFor"] != 3:
-        return -2
-
-    # Getting important data
-    test_id = additional_info["testID"]
-
-    if test_id in empty_table_ids:
-        await error_occured(message, "wu")
-        return
-
-    path1, path2, path3, done_by = cur.execute("""SELECT path1, path2, path3, doneBy
-                                       FROM tests_table WHERE testID == ?""",
-                                      [test_id]).fetchall()[0]
-    if additional_info["solvingAs"] == 1 and \
-       message.from_user.id in done_by:
-        await error_occured(message, "wu")
-        return
-    
-    modif = additional_info["testValues"]
-    last_dict = await get_dict_by_id(path1, path2, path3)
-    last_dict = list(last_dict.values())[0]
-    await state.update_data(additional_info = {"dataFor": 0})
-
-    command = last_dict[last_dict.find(";")+1:]
-    for_exec = "di=lambda x: int(x) if str(x)[-2:]=='.0' else round(x, ndigits=2);"
-    for i in range(len(modif)):
-        for_exec += f"{string.ascii_letters[i]}={modif[i]};"
-        command = command.replace("<"+str(i)+">", string.ascii_letters[i])
-    for_exec += command
-    local_context = {}
-    exec(for_exec, locals(), local_context)
-    result = local_context["ans"] == additional_info["text"]
-    if result:
-        result = "верно."
-    else:
-        result = f"неверно.\nВерным ответом было \"{local_context['ans']}\""
-
-    callback_to = ""
-    if additional_info["redirectTo"][:16] == "teacher_precheck":
-        cur.execute("DELETE FROM tests_table WHERE testID == ?", [test_id])
-        db.commit()
-        callback_to = f"teacher_tests_precheck_]{path1}>{path2}:{path3}"
-    elif additional_info["redirectTo"][:18] == "teacher_tests_view":
-        callback_to = f"teacher_tests_view_{test_id}"
-    elif additional_info["redirectTo"][:18] == "student_tests_list":
-        cur.execute("UPDATE tests_table SET doneBy = ? WHERE testID == ?",
-                    [done_by+[message.from_user.id], test_id])
-        db.commit()
-        callback_to = "student_tests_list"
-    kb = [[types.InlineKeyboardButton(text = "Продолжить",
-                             callback_data = callback_to)]]
-    keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
-
-    await bot.send_message(text=f"Решение задачи №{additional_info['solving']}:\n"+\
-                            "\nРешено - "+result,
-                           chat_id = message.chat.id,
-                           reply_markup = keyboard)
-
-
-
-@router.callback_query(F.data[:24] == "teacher_tests_set_parall")
-@flags.permission("teacher")
-async def teacher_tests_set_parallel(callback: types.CallbackQuery,
-            state: FSMContext, selected: [int,...] = []) -> None | int:
-    class_id = int(callback.data[24:callback.data.find("|")])
-    test_id = int(callback.data[callback.data.find("|")+1:])
-    if test_id in empty_table_ids:
-        await error_occured(callback.message, "wu")
-        return
-    cur.execute("UPDATE tests_table SET classID == ? WHERE testID == ?",
-                [class_id, test_id])
-    db.commit()
-    kb = [[types.InlineKeyboardButton(text = "Вернуться",
-                    callback_data = f"teacher_tests_values_{test_id}")]]
-    keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
-    await callback.message.edit_text("Готово", reply_markup = keyboard)
-
-"""==============================================================================="""
-async def _old_teacher_tests_parallel(callback: types.CallbackQuery,
-            state: FSMContext) -> None | int:  # Добавить меню, как из teacher_tests_control
-    fetch = cur.execute("""SELECT classID, name FROM classes_table WHERE
-            teacherID == ?""", [callback.from_user.id]).fetchall()
-    kb = []
-    for i in range(len(fetch)):
-        kb.append([types.InlineKeyboardButton(text = fetch[i][1],
-                    callback_data = f"teacher_tests_set_parall{fetch[i][0]}|"+\
-                                    callback.data[20:])])   # Test ID
-    keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
-
-    await callback.message.edit_text("Доступные Вам классы:",
-                                     reply_markup = keyboard)
-"""==============================================================================="""
-
-@router.callback_query(F.data[:21] == "teacher_tests_createc") # Check if test is OK
-@flags.permission("teacher")
-async def teacher_tests_create_check(callback: types.CallbackQuery,
-                                     state: FSMContext) -> None | int:
-    test_id = int(callback.data[21:])
-    if test_id in empty_table_ids:
-        await error_occured(callback.message, "wu")
-        return
-    fetch = cur.execute("SELECT classID, userID FROM tests_table WHERE testID == ?",
-                        [test_id]).fetchall()
-    if fetch[0][0] == 0:
-        print(fetch)
-        kb = [[types.InlineKeyboardButton(text = "Вернуться",
-                             callback_data = f"teacher_tests_values_{test_id}")]]
-        keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
-        await callback.message.edit_text("Вы не указали класс, что получит задание!",
-                                         reply_markup = keyboard)
-    else:
-        await teacher_tests_create_0(callback, state)
 
 
 # Teacher functions to control tests
@@ -549,8 +350,8 @@ async def teacher_tests_control(callback: types.CallbackQuery,
 
 class TestsScene(Scene, state="test_manage"):
     @on.callback_query.enter()
-    async def on_enter(self, callback: types.CallbackQuery, state: FSMContext,
-                       entered_step: int = 0, identification: str = ''):
+    async def on_enter_cb(self, callback: types.CallbackQuery,
+                entered_step: int = 0, identification: str = ''):
         if (await self.wizard.get_data())["logged_as"] == 1:
             match entered_step:
                 case 1:
@@ -579,17 +380,12 @@ class TestsScene(Scene, state="test_manage"):
                         ident=identification
                     )
                 case 6:
-                    return await self.create_settings(
+                    return await self.create_settings_modify(
                         callback=callback,
                         ident=identification
                     )
                 case 7:
                     return await self.solve(
-                        callback=callback,
-                        ident=identification if identification != '' else '1'
-                    )
-                case 8:
-                    return await self.check_solving(
                         callback=callback,
                         ident=identification if identification != '' else '1'
                     )
@@ -604,6 +400,9 @@ class TestsScene(Scene, state="test_manage"):
                 case 7:
                     pass
 
+        else:
+            return
+
         await self.wizard.update_data(scene_data={})
 
         # Создать тест здесь или импортировать из файла?
@@ -616,16 +415,34 @@ class TestsScene(Scene, state="test_manage"):
 
         await callback.message.edit_text(msg, reply_markup = keyboard)
 
+    @on.message.enter()
+    async def on_enter_message(self, message: types.Message,
+                entered_step: int = 0, identification: str = ''):
+        if (await self.wizard.get_data())["logged_as"] == 1:
+            match entered_step:
+                case 8:
+                    return await self.check_solving(
+                        message=message,
+                        ident=identification if identification != '' else '1'
+                    )
+
+        elif (await self.wizard.get_data())["logged_as"] == 0:
+            match entered_step:
+                case 8:
+                    return await self.check_solving(
+                        message=message,
+                        ident=identification if identification != '' else '1'
+                    )
 
     # Useful functions
-    async def get_test_value(self, path):
+    async def get_test_value(self, path) -> dict:
         val = DATA_TESTS
         for i in path:
             val = val[i]
         return val
 
     @property
-    def get_table_ids(self):
+    def get_table_ids(self) -> list:
         global max_table_id
         if not len(empty_table_ids):
             empty_table_ids.append(list(range(max_table_id, max_table_id*2)))
@@ -654,7 +471,7 @@ class TestsScene(Scene, state="test_manage"):
                 text = list(data_tests.keys())[i],
                 callback_data = f"back_to_scene{i}"
             ))
-        await PagedView(event=self.wizard.event,
+        return await PagedView(event=self.wizard.event,
             permission="teacher",
             function_name=function_name,
             pages = pages,
@@ -663,6 +480,32 @@ class TestsScene(Scene, state="test_manage"):
             forward_to = None,
             arguments = {"back_to": "TestsScene", "step": step}
         ).handle(state = self.wizard.state)
+
+    async def get_common_db_data(self, data, *additional_fields) -> list:
+        # Returns scene_data and test_id by default and other fields from args
+        # Of course this only works if we have `test_id` in `scene_data`
+        scene_data = (await self.wizard.get_data())["scene_data"]
+        test_id = scene_data.get("test_id")
+        if test_id in self.get_table_ids:
+            return await error_occured(callback, "wu")
+        data = cur.execute(f"""
+            SELECT
+                {", ".join(additional_fields)}
+            FROM
+                tests_table
+            WHERE
+                testID == ?
+        """, [test_id]).fetchall()
+        if len(data) == 0:
+            # Something is REALY wrong and we should exit immedietly
+            err_message = f"""Somehow data for testID {test_id} is empty, \
+but this ID is not in list. Adding this entry to the list"""
+            logger.error(err_message)
+            self.get_table_ids.append(test_id)
+            return await error_occured(data, "e", "get_common_db_data")
+            # We can't really stop all update at this exit so there will be huge err
+        return [scene_data, test_id, *data[0]]
+
 
     @on.callback_query(F.data == "create_0")
     @flags.permission("teacher")
@@ -674,7 +517,7 @@ class TestsScene(Scene, state="test_manage"):
                 text = list(data_tests.keys())[i],
                 callback_data = f"back_to_scene{i}"
             ))
-        await PagedView(event=self.wizard.event,
+        return await PagedView(event=self.wizard.event,
             permission="teacher",
             function_name="test_create_0",
             pages = pages,
@@ -701,7 +544,7 @@ class TestsScene(Scene, state="test_manage"):
         scene_data.update(path=[])
         await self.wizard.update_data(scene_data=scene_data)
 
-        await self.create_base(
+        return await self.create_base(
             callback = callback,
             ident = ident,
             function_name = "tests_create_1",
@@ -710,7 +553,7 @@ class TestsScene(Scene, state="test_manage"):
         )
 
     async def create_1_5(self, callback: types.CallbackQuery, ident):
-        await self.create_base(
+        return await self.create_base(
             callback = callback,
             ident = ident,
             function_name = "tests_create_1_5",
@@ -720,7 +563,7 @@ class TestsScene(Scene, state="test_manage"):
 
     # This function is being started from `on_enter` only
     async def create_2(self, callback: types.CallbackQuery, ident):
-        await self.create_base(
+        return await self.create_base(
             callback = callback,
             ident = ident,
             function_name = "test_create_2",
@@ -730,7 +573,7 @@ class TestsScene(Scene, state="test_manage"):
 
     # This function is being started from `on_enter` only
     async def create_3(self, callback: types.CallbackQuery, ident):
-        await self.create_base(
+        return await self.create_base(
             callback = callback,
             ident = ident,
             mainmenu_text = "Выберите группу",
@@ -740,7 +583,7 @@ class TestsScene(Scene, state="test_manage"):
 
     # This function is being started from `on_enter` only
     async def create_4(self, callback: types.CallbackQuery, ident):
-        await self.create_base(
+        return await self.create_base(
             callback = callback,
             ident = ident,
             mainmenu_text = "Выберите задание",
@@ -785,7 +628,7 @@ class TestsScene(Scene, state="test_manage"):
 
         keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
         msg = "/".join(path) + "/\nПредварительный просмотр задачи:\n"+msg
-        await callback.message.edit_text(msg, reply_markup = keyboard)
+        return await callback.message.edit_text(msg, reply_markup = keyboard)
 
     @on.callback_query(F.data[:14] == "tests_create_5")
     @flags.permission("teacher")
@@ -817,7 +660,7 @@ class TestsScene(Scene, state="test_manage"):
                     limits[i] = [limits[i][-2], *includ]
                 else:
                     exclude = limits[i][limits[i].find("\\")+2:-3].split("!")
-                    limits[i] = [limits[i][-2]+"c", *includ, list(map(int, exclude))]
+                    limits[i] = [limits[i][-2]+"c", *includ, list(map(int,exclude))]
             elif limits[i][-1] == "z":
                 multiplier = round(multiplier)
                 limits[i] = ["z", -1 * multiplier, multiplier]
@@ -825,6 +668,7 @@ class TestsScene(Scene, state="test_manage"):
         test_id = (self.get_table_ids).pop()
         scene_data.update(test_id=test_id)
         await self.wizard.update_data(scene_data=scene_data)
+        print(type(test_id))
         cur.execute("""
             INSERT INTO
                 tests_table
@@ -857,22 +701,10 @@ class TestsScene(Scene, state="test_manage"):
 
     @router.callback_query(F.data[:20] == "teacher_tests_values")
     @flags.permission("teacher")
-    async def create_settings(callback: types.CallbackQuery, ident = ''):
-        scene_data = (await self.wizard.get_data())["scene_data"]
-        test_id = scene_data["test_id"]
-        if test_id in self.get_table_ids:
-            return await error_occured(callback.message, "wu")
-
-        path, limits, done_by = cur.execute("""
-            SELECT
-                path,
-                modif,
-                doneBy
-            FROM
-                tests_table
-            WHERE
-                testID == ?
-        """, [test_id]).fetchall()[0]
+    async def create_settings(self, callback: types.CallbackQuery, ident = ''):
+        scene_data, test_id, path, limits, done_by = await self.get_common_db_data(
+            callback, "path", "modif", "doneBy"
+        )
         data_tests = await self.get_test_value(path)
 
         standart_limits = []
@@ -897,8 +729,8 @@ class TestsScene(Scene, state="test_manage"):
                 )
             else:
                 standart_limits.append(
-                    string.ascii_letters[i]+f" ∈ [{limits[i][1]}, {limits[i][2]}]"+\
-                        " \\ {"+str(limits[i][3])[1:-1]+"}"
+                    string.ascii_letters[i]+f" ∈ [{limits[i][1]}, \
+                        {limits[i][2]}]"+" \\ {"+str(limits[i][3])[1:-1]+"}"
                 )
             kb.append(types.InlineKeyboardButton(
                 text = "Изменить "+string.ascii_letters[i],
@@ -911,7 +743,7 @@ class TestsScene(Scene, state="test_manage"):
             textMessage += "Выбранные настройки:\n"
         textMessage += "\n".join(standart_limits)
 
-        await PagedView(event=self.wizard.event,
+        return await PagedView(event=self.wizard.event,
             permission="teacher",
             function_name="test_create_settings",
             pages = pages,
@@ -921,20 +753,14 @@ class TestsScene(Scene, state="test_manage"):
             arguments = {"back_to": "TestsScene", "step": 6}
         ).handle(state = self.wizard.state)
 
+    # This function is being started from `on_enter` only
     async def create_settings_modify(self, callback: types.CallbackQuery, ident):
-        scene_data = (await self.wizard.get_data())["scene_data"]
-        test_id = scene_data["test_id"]
-        if test_id in self.get_table_ids:
-            return await error_occured(callback.message, "wu")
+        scene_data, test_id, limits = await self.get_common_db_data(
+            callback, "modif"
+        )
+        if ident == '-1':   # If user pressed next step button
+            return await self.create_settings(callback=callback, ident=ident)
         ident = int(ident)
-        limits = cur.execute("""
-            SELECT
-                modif
-            FROM
-                tests_table
-            WHERE
-                testID == ?
-        """, [test_id]).fetchall()[0]
         if ident < 0 or ident >= len(limits):
             return await error_occured(callback.message, "wu")
         limits = limits[ident]
@@ -946,32 +772,26 @@ class TestsScene(Scene, state="test_manage"):
 
         if limits[0][1:] == 'c':
             limits_type += "\nОбратите внимание, что значения {" +\
-                    "; ".join(limits[3]) + "} будут исключены"
+                "; ".join(limits[3]) + "} будут исключены"
 
+        keyboard: list ###############################################################
         msg = f"""Изменение {string.ascii_letters[ident]}
 Вы изменяете переменную
 string.ascii_letters[ident]
 Введите её параметры в виде {parameter_type}
 {limits_type}"""
 
+        await callback.message.edit_text(msg)
+
+    async def create_settings_set(self, message: types.Message, ident):
+        if text[0] == "[" and text[-1] == "]" and len(text[1:-1].split()) == 2
+
     @on.callback_query(F.data == "solve")
     @flags.permission("all")
     async def solve(self, callback: types.CallbackQuery, ident = '1'):
-        scene_data = (await self.wizard.get_data())["scene_data"]
-        test_id = scene_data["test_id"]
-        if test_id in self.get_table_ids:
-            return await error_occured(callback.message, "wu")
-
-        path, limits, done_by = cur.execute("""
-            SELECT
-                path,
-                modif,
-                doneBy
-            FROM
-                tests_table
-            WHERE
-                testID == ?
-        """, [test_id]).fetchall()[0]
+        scene_data, test_id, path, limits, done_by = await self.get_common_db_data(
+            callback, "path", "modif", "doneBy"
+        )
         data_tests = await self.get_test_value(path)
 
         if callback.from_user.id in done_by:
@@ -1007,24 +827,15 @@ string.ascii_letters[ident]
 
     # This function is being started from `on_enter` only
     # This function is being called by message_redirect in main.py
-    async def check_solving(self, callback: types.CallbackQuery, ident = '1'):
-        scene_data = (await self.wizard.get_data())["scene_data"]
-        test_id = scene_data["test_id"]
-        test_values = scene_data["test_values"]
-        redirect_after_solving = scene_data["redirect_after_solving"]
-        if test_id in self.get_table_ids:
-            return await error_occured(message, "wu")
+    async def check_solving(self, message: types.Message, ident = '1'):
+        scene_data, test_id, path, done_by = await self.get_common_db_data(
+            message, "path", "doneBy"
+        )
+        additional_info = (await self.wizard.get_data())["additional_info"]
 
         # Getting important data
-        path, done_by = cur.execute("""
-            SELECT
-                path,
-                doneBy
-            FROM
-                tests_table
-            WHERE
-                testID == ?
-        """, [test_id]).fetchall()[0]
+        test_values = scene_data["test_values"]
+        redirect_after_solving = scene_data["redirect_after_solving"]
         data_tests = await self.get_test_value(path)
         command = data_tests["func"]
 
@@ -1032,7 +843,9 @@ string.ascii_letters[ident]
             await error_occured(message, "wu")
             return
 
-        for_exec = "di=lambda x:int(x) if str(x)[-2:]=='.0'else round(x, ndigits=2);"
+        # If we are using division, in answer we will round it to 2 numbers after comma
+        for_exec = "di=lambda x:int(x)if str(x)[-2:]=='.0'else round(x,ndigits=2);"
+
         for i in range(len(test_values)):
             for_exec += f"{string.ascii_letters[i]}={test_values[i]};"
             command = command.replace("<"+str(i)+">", string.ascii_letters[i])
@@ -1045,14 +858,12 @@ string.ascii_letters[ident]
         else:
             result = f"неверно.\nВерным ответом было \"{local_context['ans']}\""
 
-        if self.redirect_after_solving == "create_preview":
-            cur.execute("DELETE FROM tests_table WHERE testID == ?", [self.test_id])
-            db.commit()
-            callback_to = "create_preview"
+        if redirect_after_solving == "create_preview":
+            callback_to = "redirect_to_create_preview"
 
-        elif self.redirect_after_solving == "teacher_tests_view":   #############################
+        elif redirect_after_solving == "teacher_tests_view":   #############################
             callback_to = f"teacher_tests_view_{test_id}"           #############################
-        elif self.redirect_after_solving == "student_tests_list":   #############################
+        elif redirect_after_solving == "student_tests_list":   #############################
             cur.execute("UPDATE tests_table SET doneBy = ? WHERE testID == ?", ##################
                         [done_by+[message.from_user.id], test_id])  #############################
             db.commit()  #################################
@@ -1063,21 +874,38 @@ string.ascii_letters[ident]
         keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
         msg = f"Решение задачи №{ident}:\nРешено - "+result
 
-        await bot.send_message(text=msg,
-                               chat_id = message.chat.id,
-                               reply_markup = keyboard)
+        await bot.send_message(
+            text = msg,
+            chat_id = message.chat.id,
+            reply_markup = keyboard
+        )
+
+    @on.callback_query(F.data == "redirect_to_create_preview")
+    @flags.permission("teacher")
+    async def redirect_to_create_preview(self, callback: types.CallbackQuery):
+        scene_data, test_id, path = await self.get_common_db_data(
+            callback, "path"
+        )
+        cur.execute("DELETE FROM tests_table WHERE testID == ?", [test_id])
+        db.commit()
+        ident = list((await self.get_test_value(path[:-1])).values())
+        ident = ident.index(await self.get_test_value(path))
+        path = path[:-1]
+        scene_data.update(path=path)
+        await self.wizard.update_data(scene_data=scene_data)
+        return await self.create_preview(callback=callback, ident=ident)
 
 
 @router.callback_query(F.data == "tests_manage")
 @flags.permission("teacher")
 async def tests_manage(callback: types.CallbackQuery, scenes: ScenesManager,
-        state: FSMContext) -> None:
+            state: FSMContext) -> None:
     await scenes.close()
-    await scenes.enter(TestsScene, state=FSMContext)
+    await scenes.enter(TestsScene)
 
 @router.callback_query(F.data == "tests_complete")
 @flags.permission("student")
 async def tests_complete(callback: types.CallbackQuery, scenes: ScenesManager,
-        state: FSMContext) -> None:
+            state: FSMContext) -> None:
     await scenes.close()
-    await scenes.enter(TestsScene, state=FSMContext)
+    await scenes.enter(TestsScene)

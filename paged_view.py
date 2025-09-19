@@ -36,7 +36,7 @@ class PagedView(CallbackQueryHandler):
 
         additional_info = (await state.get_data())["additional_info"]
 
-        # If between PagedView handlers there was one non-pagedview handler
+        # If between PagedView handlers there was one non-PagedView handler
         if not (additional_info["dataFor"] == 9 and
                 additional_info["pagedview_name"] == self.data["function_name"]):
             if len(self.data["pages"]) == 0:
@@ -64,12 +64,6 @@ class PagedView(CallbackQueryHandler):
             return await self.__page_change(direction="backward", state=state)
         else:
             return await self.__main_menu(state=state)
-        '''else:
-            if "prev" not in additional_info.keys():
-                additional_info.update(prev=[])
-            additional_info.update(prev=additional_info["prev"]+
-                                        self.callback_data()[10:])
-            await self.state().update_data(additional_info=additional_info)'''
 
     async def __page_change(self, direction: str, state: FSMContext) -> Any:
         additional_info = (await state.get_data())["additional_info"]
@@ -127,5 +121,7 @@ class PagedView(CallbackQueryHandler):
 
         keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
 
-        await self.message.edit_text(self.data["mainmenu_text"],
-                                     reply_markup=keyboard)
+        await self.message.edit_text(
+            self.data["mainmenu_text"],
+            reply_markup=keyboard
+        )

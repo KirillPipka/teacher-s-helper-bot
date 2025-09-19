@@ -102,14 +102,14 @@ async def back_to_scene(data: types.CallbackQuery | types.Message,
             step = additional_info["b2s_args"]["step"]
         case _:
             return
+    kwargs = {"entered_step": step, "identification": identification}
     if type(await scenes._get_active_scene()).__name__ != back_to:
         return
 
     await scenes.enter(
         scene_type=tests.TestsScene,
         _check_active=False,
-        entered_step=step,
-        identification=identification
+        **kwargs
     )
 
 @dp.callback_query(F.data == "menu_callback_redirect")
@@ -148,6 +148,7 @@ async def menu_student(message, state):
     await message.answer("Меню ученика.", reply_markup = keyboard)
 
 @dp.message(Command("stop"), flags={"skip_permission_middleware": True})   # Убрать в релизе
+@flags.permission("all")
 async def stop_bot(message: types.Message, state: FSMContext) -> None:
     logger.info("Closing database...")
     try:

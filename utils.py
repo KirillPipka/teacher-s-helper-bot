@@ -71,13 +71,16 @@ async def error_occured(data, reason, where = "unstated"):
     if type(data) == types.Message:
         message: types.Message = data
         user_id: int = data.from_user.id
+    elif type(data) == types.CallbackQuery:
+        message: types.Message = data.message
+        user_id: int = data.from_user.id
     elif type(data) == types.Update:
         if type(data.message) != NoneType:
             message: types.Message = data.message
-            user_id = data.message.from_user.id
+            user_id: int = data.message.from_user.id
         elif type(data.callback_query) != NoneType:
             message: types.Message = data.callback_query.message
-            user_id = data.callback_query.from_user.id
+            user_id: int = data.callback_query.from_user.id
 
     fetch = cur.execute("SELECT authorizedAs FROM authorized WHERE userID == ?",
                         [user_id]).fetchall()
