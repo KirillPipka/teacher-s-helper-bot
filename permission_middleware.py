@@ -14,7 +14,7 @@ class PermissionMiddleware(BaseMiddleware):
     ) -> Any:
         if flags.get_flag(data, "skip_permission_middleware"):
             return await handler(event, data)
-        logged_as = (await data["state"].get_data())["logged_as"]
+        logged_as = (await data["state"].get_data()).get("logged_as", -1)
         permission_for: str = flags.get_flag(data, "permission")
         if permission_for == "teacher" and logged_as == 1:
             return await handler(event, data)

@@ -1,23 +1,18 @@
+# начение времени по умоолчанию в collproblems
+# Посмотреть приём значений с минусами
+# Возможность проСМОТРЕТЬ
+
+
 # == Что ещё можно сделать:
 #     > Облегчить интерфейс
 # ~~~> Добавить время максимального выполнения задачи~~~
 # ~~~> Добавить выполнение нескольких задач подряд ( сборник задач - collection of problems[colProb] )~~~
 # > Переделать все последовательные операции в scenes для aiogram
 # > Проверять, было ли удалено сообщение в middleware
-# > Добавить ученикам и учителям имена
-#   +В student_tests_rsolve
-# > Добавить клавиатуры в:
-#   +student_tests_list
-#   +teacher_tests_class
 # > Добавить сортировку по цифре и литере класса
-# > DATA_TESTS, max_table_id и empty_table_ids переделать в @dataclass
 # > Добавить статистику
 # > i18n на Fluent
-# > Импортировать тест из файла
 #> Не показывать ученику задание, что он делает
-# == Вопросики к коду:
-# > Почему STUDENT_tests_rsolve обращается к TEACHER_tests_solve ?
-# > Почему если нажать "Вернуться" к меню учителя, но зайти как ученик, то будет меню ученика?
 
 # == Проверки:
 # №1.Точно ли всё будет хорошо работать, если вдруг кто-то случайно запустит 2 /start ?
@@ -34,6 +29,7 @@ from aiogram import flags
 import numpy as np
 from utils import cur, db, bot, error_occured
 from paged_view import PagedView
+import check_utils
 import logging
 import random
 import string
@@ -103,70 +99,6 @@ async def get_dict_by_id(id0, id1 = None, id2 = None) -> dict:
 
 
 # Student functions to manage tests
-
-@router.callback_query(F.data == "student_tests_list")
-@flags.permission("student")
-async def student_tests_list(callback: types.CallbackQuery,
-                             state: FSMContext) -> None | int:      # Добавить меню, как из teacher_tests_control
-    fetch = np.array(cur.execute("SELECT studentsID FROM classes_table").fetchall())
-    class_id = np.array(cur.execute("SELECT classID FROM classes_table").fetchall())
-    # Getting <classID> where user id mathes any id in <studentsID>
-    class_id = class_id[np.where(fetch[:, 0] == callback.from_user.id)]
-
-    fetch = cur.execute("""SELECT doneBy, path1, path2, path3, creationDate, testID
-                         FROM tests_table WHERE classID == ?""",
-                        [int(class_id)]).fetchall()
-    # Getting all tests data where user is not in <doneBy> column
-    kb = []
-    for i in range(len(fetch)):
-        if callback.from_user.id not in fetch[i][0]:
-            path = ") " + "\\".join(await get_name_by_id(*fetch[i][1:4]))
-            kb.append([types.InlineKeyboardButton(text = "("+str(fetch[i][4])+\
-                                                   path,
-                                                  callback_data = "student_tests_"+\
-                                                          f"rsolve_{fetch[i][5]}")])
-    if len(kb) == 0:
-        await error_occured(callback.message, "wu")
-        return
-    
-    keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
-    await callback.message.edit_text(text = "Невыполненные задания:",
-                                     reply_markup = keyboard)
-
-@router.callback_query(F.data[:20] == "student_tests_rsolve") # rsolve - redirect to solve
-@flags.permission("student")
-async def student_tests_rsolve(callback: types.CallbackQuery,
-                               state: FSMContext) -> None | int:
-    test_id = int(callback.data[21:])
-
-    if test_id in empty_table_ids:
-        await error_occured(callback.message, "wu")
-        return
-    if (await state.get_data())["additional_info"]["dataFor"] == 4 and \
-            (await state.get_data())["additional_info"]["solvingAs"] == 1 and \
-            (await state.get_data())["additional_info"]["testID"] == test_id:
-
-        await callback.message.edit_text("Вы уже решаете этот тест!"+ \
-                                         "Если это не так, пропишите /start")
-
-    fetch = cur.execute("""SELECT path1, path2, path3, creationDate FROM tests_table
-                         WHERE testID == ?""",
-                        [test_id]).fetchall()[0]
-    await state.update_data(additional_info = {"dataFor":    4,
-                                               "testID":     test_id,
-                                               "messageID":  callback.message\
-                                                             .message_id,
-                                               "solving":    1,
-                                               "redirectTo": "student_tests_list",
-                                               "solvingAs":  1})
-    kb = [[types.InlineKeyboardButton(text = "Решить",
-                             callback_data = f"teacher_tests_solve")],
-          [types.InlineKeyboardButton(text = "Вернуться",
-                             callback_data = f"student_tests_list")]]
-    keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
-    await callback.message.edit_text("\\".join(await get_name_by_id(*fetch[:3]))+\
-                                     f"\nОт {fetch[3]}", reply_markup = keyboard)
-
 
 # Teacher functions to control tests
 
@@ -348,90 +280,102 @@ async def teacher_tests_control(callback: types.CallbackQuery,
 
 # Implementing new scenes from aiogram 3.22.0
 
-class TestsScene(Scene, state="test_manage"):
+class TestsScene(Scene, state = "tests_scene"):
     @on.callback_query.enter()
-    async def on_enter_cb(self, callback: types.CallbackQuery,
-                entered_step: int = 0, identification: str = ''):
+    async def on_enter_callback(self, callback: types.CallbackQuery,
+            entered_step: int = 0, identification: str = ''):
         if (await self.wizard.get_data())["logged_as"] == 1:
             match entered_step:
+                case 0:
+                    return await self.create_0(
+                        callback = callback
+                    )
                 case 1:
                     return await self.create_1(
-                        callback=callback,
-                        ident=identification
+                        callback = callback,
+                        ident = identification
                     )
                 case 2:
                     return await self.create_2(
-                        callback=callback,
-                        ident=identification
+                        callback = callback,
+                        ident = identification
                     )
                 case 3:
                     return await self.create_3(
-                        callback=callback,
-                        ident=identification
+                        callback = callback,
+                        ident = identification
                     )
                 case 4:
                     return await self.create_4(
-                        callback=callback,
-                        ident=identification
+                        callback = callback,
+                        ident = identification
                     )
                 case 5:
                     return await self.create_preview(
-                        callback=callback,
-                        ident=identification
+                        callback = callback,
+                        ident = identification
                     )
                 case 6:
                     return await self.create_settings_modify(
-                        callback=callback,
-                        ident=identification
+                        callback = callback,
+                        ident = identification
                     )
                 case 7:
                     return await self.solve(
-                        callback=callback,
-                        ident=identification if identification != '' else '1'
+                        callback = callback,
+                        ident = identification if identification != '' else '1'
                     )
                 case 9:
                     return await self.create_1_5(
-                        callback=callback,
-                        ident=identification
+                        callback = callback,
+                        ident = identification
+                    )
+                case 11:
+                    print("via callback")
+                    return await self.create_final(
+                        message = callback.message
                     )
 
         elif (await self.wizard.get_data())["logged_as"] == 0:
             match entered_step:
-                case 7:
-                    pass
+                case 0:
+                    return await self.student_list(
+                        callback = callback
+                    )
+                case 12:
+                    return await self.student_tests_rsolve(
+                        callback = callback,
+                        ident = identification
+                    )
 
         else:
             return
 
-        await self.wizard.update_data(scene_data={})
-
-        # Создать тест здесь или импортировать из файла?
-        kb = [[types.InlineKeyboardButton(text = "Здесь",
-                    callback_data = "create_0")],
-              [types.InlineKeyboardButton(text = "Импортировать из файла", ########################
-                    callback_data = "create_import")]] ############ заменить на что-нибудь ещё ####
-        keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
-        msg = "Вы хотите создать тест здесь или импортировать из файла?"  #########################
-
-        await callback.message.edit_text(msg, reply_markup = keyboard)
-
     @on.message.enter()
     async def on_enter_message(self, message: types.Message,
-                entered_step: int = 0, identification: str = ''):
+            entered_step: int = 0, identification: str = ''):
         if (await self.wizard.get_data())["logged_as"] == 1:
             match entered_step:
                 case 8:
                     return await self.check_solving(
-                        message=message,
-                        ident=identification if identification != '' else '1'
+                        message = message
+                    )
+                case 10:
+                    return await self.create_settings_set(
+                        message = message,
+                        ident = identification
+                    )
+                case 11:
+                    print("via message")
+                    return await self.create_final(
+                        message = message
                     )
 
         elif (await self.wizard.get_data())["logged_as"] == 0:
             match entered_step:
                 case 8:
                     return await self.check_solving(
-                        message=message,
-                        ident=identification if identification != '' else '1'
+                        message = message
                     )
 
     # Useful functions
@@ -445,7 +389,7 @@ class TestsScene(Scene, state="test_manage"):
     def get_table_ids(self) -> list:
         global max_table_id
         if not len(empty_table_ids):
-            empty_table_ids.append(list(range(max_table_id, max_table_id*2)))
+            empty_table_ids.extend(list(range(max_table_id, max_table_id*2)))
             max_table_id *= 2
         return empty_table_ids
 
@@ -460,10 +404,10 @@ class TestsScene(Scene, state="test_manage"):
 
         # Getting data to generate pages
         path.append(list(data_tests.keys())[ident])
-        scene_data.update(path=path)
-        await self.wizard.update_data(scene_data=scene_data)
+        scene_data.update(path = path)
+        await self.wizard.update_data(scene_data = scene_data)
         data_tests = data_tests[path[-1]]
-        pages: list[types.InlineKeyboardButton] = []
+        pages: list[types.InlineKeyboardButton, ...] = []
         for i in range(len(data_tests)):
             if list(data_tests.keys())[i][0] == "_":
                 continue
@@ -471,21 +415,23 @@ class TestsScene(Scene, state="test_manage"):
                 text = list(data_tests.keys())[i],
                 callback_data = f"back_to_scene{i}"
             ))
-        return await PagedView(event=self.wizard.event,
-            permission="teacher",
-            function_name=function_name,
+        return await PagedView(event = self.wizard.event,
+            permission = "teacher",
+            function_name = function_name,
             pages = pages,
             mainmenu_text = "/".join(path) + "/\n" + mainmenu_text,
             back_to = "menu_callback_redirect",
             forward_to = None,
-            arguments = {"back_to": "TestsScene", "step": step}
+            arguments = {"back_to": "tests_scene", "step": step}
         ).handle(state = self.wizard.state)
 
-    async def get_common_db_data(self, data, *additional_fields) -> list:
+    async def get_common_db_data(self, *additional_fields) -> list:
         # Returns scene_data and test_id by default and other fields from args
         # Of course this only works if we have `test_id` in `scene_data`
         scene_data = (await self.wizard.get_data())["scene_data"]
         test_id = scene_data.get("test_id")
+        if test_id == None:
+            return await error_occured(callback, "e")
         if test_id in self.get_table_ids:
             return await error_occured(callback, "wu")
         data = cur.execute(f"""
@@ -497,38 +443,37 @@ class TestsScene(Scene, state="test_manage"):
                 testID == ?
         """, [test_id]).fetchall()
         if len(data) == 0:
-            # Something is REALY wrong and we should exit immedietly
+            # Something is REALLY wrong and we should exit immedietly
             err_message = f"""Somehow data for testID {test_id} is empty, \
 but this ID is not in list. Adding this entry to the list"""
             logger.error(err_message)
             self.get_table_ids.append(test_id)
-            return await error_occured(data, "e", "get_common_db_data")
-            # We can't really stop all update at this exit so there will be huge err
+            return await error_occured(data, "e", "get_common_db_data",
+                f"data for testID {test_id} is empty")
         return [scene_data, test_id, *data[0]]
 
 
-    @on.callback_query(F.data == "create_0")
-    @flags.permission("teacher")
+    # This function is being started from `on_enter` only
     async def create_0(self, callback: types.CallbackQuery):
-        pages: list[types.InlineKeyboardButton] = []
+        pages: list[types.InlineKeyboardButton, ...] = []
         data_tests = DATA_TESTS
         for i in range(len(data_tests)):
             pages.append(types.InlineKeyboardButton(
                 text = list(data_tests.keys())[i],
                 callback_data = f"back_to_scene{i}"
             ))
-        return await PagedView(event=self.wizard.event,
-            permission="teacher",
-            function_name="test_create_0",
+        return await PagedView(event = self.wizard.event,
+            permission = "teacher",
+            function_name = "test_create_0",
             pages = pages,
             mainmenu_text = "Выберите предмет",
             back_to = "menu_callback_redirect",
             forward_to = None,
-            arguments = {"back_to": "TestsScene", "step": 1}
+            arguments = {"back_to": "tests_scene", "step": 1}
         ).handle(state = self.wizard.state)
 
     # This function is being started from `on_enter` only
-    async def create_1(self, callback: types.CallbackQuery, ident):
+    async def create_1(self, callback: types.CallbackQuery, ident: str):
         ident = int(ident)
         if ident < 0 or ident >= len(DATA_TESTS):
             return await error_occured(callback.message, "wu")
@@ -552,7 +497,7 @@ but this ID is not in list. Adding this entry to the list"""
             step = step
         )
 
-    async def create_1_5(self, callback: types.CallbackQuery, ident):
+    async def create_1_5(self, callback: types.CallbackQuery, ident: str):
         return await self.create_base(
             callback = callback,
             ident = ident,
@@ -562,7 +507,7 @@ but this ID is not in list. Adding this entry to the list"""
         )
 
     # This function is being started from `on_enter` only
-    async def create_2(self, callback: types.CallbackQuery, ident):
+    async def create_2(self, callback: types.CallbackQuery, ident: str):
         return await self.create_base(
             callback = callback,
             ident = ident,
@@ -572,28 +517,28 @@ but this ID is not in list. Adding this entry to the list"""
         )
 
     # This function is being started from `on_enter` only
-    async def create_3(self, callback: types.CallbackQuery, ident):
+    async def create_3(self, callback: types.CallbackQuery, ident: str):
         return await self.create_base(
             callback = callback,
             ident = ident,
             mainmenu_text = "Выберите группу",
-            function_name="test_create_3",
+            function_name = "test_create_3",
             step = 4
         )
 
     # This function is being started from `on_enter` only
-    async def create_4(self, callback: types.CallbackQuery, ident):
+    async def create_4(self, callback: types.CallbackQuery, ident: str):
         return await self.create_base(
             callback = callback,
             ident = ident,
             mainmenu_text = "Выберите задание",
-            function_name="test_create_4",
+            function_name = "test_create_4",
             step = 5
         )
 
 
     # This function is being started from `on_enter` only
-    async def create_preview(self, callback: types.CallbackQuery, ident):
+    async def create_preview(self, callback: types.CallbackQuery, ident: str):
         scene_data = (await self.wizard.get_data())["scene_data"]
         path = scene_data["path"]
         data_tests = await self.get_test_value(path)
@@ -606,8 +551,8 @@ but this ID is not in list. Adding this entry to the list"""
 
         # Getting important data
         path.append(list(data_tests.keys())[ident])
-        scene_data.update(path=path)
-        await self.wizard.update_data(scene_data=scene_data)
+        scene_data.update(path = path)
+        await self.wizard.update_data(scene_data = scene_data)
         data_tests = data_tests[path[-1]]
 
         msg = data_tests["text"]
@@ -619,12 +564,18 @@ but this ID is not in list. Adding this entry to the list"""
                 string.ascii_letters[i]
             )
 
-        kb = [[types.InlineKeyboardButton(text = "Создать вариант",
-                    callback_data = "tests_create_5_")],
-              [types.InlineKeyboardButton(text = "Прорешать вариант",
-                    callback_data = "tests_create_5-")],
-              [types.InlineKeyboardButton(text = "Вернуться",
-                    callback_data = "menu_callback_redirect")]]
+        kb = [[types.InlineKeyboardButton(
+                    text = "Создать вариант",
+                    callback_data = "tests_create_5_"
+                )],
+              [types.InlineKeyboardButton(
+                    text = "Прорешать вариант",
+                    callback_data = "tests_create_5-"
+                )],
+              [types.InlineKeyboardButton(
+                    text = "Вернуться",
+                    callback_data = "menu_callback_redirect"
+        )]]
 
         keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
         msg = "/".join(path) + "/\nПредварительный просмотр задачи:\n"+msg
@@ -666,9 +617,8 @@ but this ID is not in list. Adding this entry to the list"""
                 limits[i] = ["z", -1 * multiplier, multiplier]
 
         test_id = (self.get_table_ids).pop()
-        scene_data.update(test_id=test_id)
-        await self.wizard.update_data(scene_data=scene_data)
-        print(type(test_id))
+        scene_data.update(test_id = test_id)
+        await self.wizard.update_data(scene_data = scene_data)
         cur.execute("""
             INSERT INTO
                 tests_table
@@ -681,116 +631,283 @@ but this ID is not in list. Adding this entry to the list"""
                  :classid,
                  :parallel,
                  :doneby)
-            """, {
+        """, {
             "userid":   callback.from_user.id,
             "testid":   test_id,
             "path":     path,
             "modif":    limits,
             "date":     datetime.today(),
             "classid":  0,
-            "parallel": path[1] if len(path)==5 else path[2],
-            "doneby":   [-1]
+            "parallel": path[1] if len(path) == 5 else path[2],
+            "doneby":   {}
         })
         db.commit()
         if callback.data[14] == "-":
-            scene_data.update(redirect_after_solving="create_preview")
-            await self.wizard.update_data(scene_data=scene_data)
+            scene_data.update(redirect_after_solving = "create_preview")
+            await self.wizard.update_data(scene_data = scene_data)
             return await self.solve(callback)
         elif callback.data[14] == "_":
             return await self.create_settings(callback)
 
-    @router.callback_query(F.data[:20] == "teacher_tests_values")
+    @on.callback_query(F.data == "teacher_tests_values")
     @flags.permission("teacher")
-    async def create_settings(self, callback: types.CallbackQuery, ident = ''):
+    async def create_settings(self, callback: types.CallbackQuery, ident: str = ''):
         scene_data, test_id, path, limits, done_by = await self.get_common_db_data(
-            callback, "path", "modif", "doneBy"
+            "path", "modif", "doneBy"
         )
         data_tests = await self.get_test_value(path)
 
         standart_limits = []
-        pages: list[types.InlineKeyboardButton] = []
-        if ident != '':
-            ident = ident.split()
-            if ident[0] == -1:
-                ## finish creation + ask if need to add to colproblems/class ###################
-                return
-            if ident[0] < 0 or ident[0] >= len(limits):
-                return error_occured(callback.message, "wu")
-            limits[ident[0]] = ident[1]
+        pages = []
+        if ident == '-1':
+            pages.append([types.InlineKeyboardButton(
+                text = "Добавить в задачник",
+                callback_data = "teacher_tests_values_addc"
+            )])
+            pages.append([types.InlineKeyboardButton(
+                text = "Как отдельное задание",
+                callback_data = "teacher_tests_values_addt"
+            )])
+            keyboard = types.InlineKeyboardMarkup(inline_keyboard = pages)
+            return await callback.message.edit_text(
+                text = "Как добавить задание?",
+                reply_markup = keyboard
+            )
 
         for i in range(len(limits)):
             if len(limits[i]) == 1:
                 standart_limits.append(
-                    string.ascii_letters[i]+" ∈ {"+limits[i][0]+"}"
+                    string.ascii_letters[i] + " ∈ {"+limits[i][0]+"}"
                 )
             elif len(limits[i]) == 3:
                 standart_limits.append(
-                    string.ascii_letters[i]+f" ∈ [{limits[i][1]}, {limits[i][2]}]"
+                    string.ascii_letters[i] + f" ∈ [{limits[i][1]}, {limits[i][2]}]"
+                )
+            elif min(limits[i][3]) > max(limits[i][1], limits[i][2]) or\
+                    max(limits[i][3]) < min(limits[i][1], limits[i][2]):
+                standart_limits.append(
+                    string.ascii_letters[i] + f" ∈ [{limits[i][1]}, {limits[i][2]}]"
                 )
             else:
                 standart_limits.append(
-                    string.ascii_letters[i]+f" ∈ [{limits[i][1]}, \
-                        {limits[i][2]}]"+" \\ {"+str(limits[i][3])[1:-1]+"}"
+                    string.ascii_letters[i] + f" ∈ [{limits[i][1]}, " +\
+                        f"{limits[i][2]}]" + " \\ {" + str(limits[i][3])[1:-1] + "}"
                 )
-            kb.append(types.InlineKeyboardButton(
-                text = "Изменить "+string.ascii_letters[i],
-                callback_data = "back_to_scene{i}" ############################################
+            pages.append(types.InlineKeyboardButton(
+                text = "Изменить " + string.ascii_letters[i],
+                callback_data = f"back_to_scene{i}"
             ))
-        textMessage = "/".join(path) + "/\nВыберете максимальные границы чисел\n"
+        msg = "/".join(path) + "/\nВыберете максимальные границы чисел\n"
         if ident == '':
-            textMessage += "По умолчанию:\n"
+            msg += "По умолчанию:\n"
         else:
-            textMessage += "Выбранные настройки:\n"
-        textMessage += "\n".join(standart_limits)
+            msg += "Выбранные настройки:\n"
+        msg += "\n".join(standart_limits)
 
         return await PagedView(event=self.wizard.event,
-            permission="teacher",
-            function_name="test_create_settings",
+            permission = "teacher",
+            function_name = "test_create_settings",
             pages = pages,
             mainmenu_text = msg,
             back_to = "menu_callback_redirect",
             forward_to = "back_to_scene-1",
-            arguments = {"back_to": "TestsScene", "step": 6}
+            arguments = {"back_to": "tests_scene", "step": 6}
         ).handle(state = self.wizard.state)
 
     # This function is being started from `on_enter` only
-    async def create_settings_modify(self, callback: types.CallbackQuery, ident):
+    async def create_settings_modify(self, callback: types.CallbackQuery,
+            ident: str):
+        additional_info = (await self.wizard.get_data())["additional_info"]
         scene_data, test_id, limits = await self.get_common_db_data(
-            callback, "modif"
+            "modif"
         )
         if ident == '-1':   # If user pressed next step button
-            return await self.create_settings(callback=callback, ident=ident)
+            return await self.create_settings(callback = callback, ident = ident)
         ident = int(ident)
         if ident < 0 or ident >= len(limits):
             return await error_occured(callback.message, "wu")
+        additional_info.update(b2s_args = {
+            "back_to": "tests_scene",
+            "step": 10,
+            "identification": str(ident)
+        })
+        additional_info.update(dataFor = 3)
+        await self.wizard.update_data(additional_info = additional_info)
         limits = limits[ident]
         parameter_type: str
         limits_type: str = ''
         if limits[0][0] == 'z':
             parameter_type = "[x, y]"
-            limits_type = "Где x и y это левая и правая границы соответственно"
+            limits_type = "где x и y это левая и правая границы соответственно"
 
         if limits[0][1:] == 'c':
             limits_type += "\nОбратите внимание, что значения {" +\
-                "; ".join(limits[3]) + "} будут исключены"
+                "; ".join(map(str, limits[3])) + "} будут исключены"
 
-        keyboard: list ###############################################################
-        msg = f"""Изменение {string.ascii_letters[ident]}
-Вы изменяете переменную
-string.ascii_letters[ident]
-Введите её параметры в виде {parameter_type}
+        msg = f""".../Изменение {string.ascii_letters[ident]}/
+Вы изменяете переменную {string.ascii_letters[ident]}
+Введите её параметры в виде {parameter_type},
 {limits_type}"""
-
         await callback.message.edit_text(msg)
 
-    async def create_settings_set(self, message: types.Message, ident):
-        if text[0] == "[" and text[-1] == "]" and len(text[1:-1].split()) == 2
+    # This function is being started from `on_enter` only
+    async def create_settings_set(self, message: types.Message, ident: str):
+        additional_info = (await self.wizard.get_data())["additional_info"]
+        text = additional_info["text"]
+        ident = int(ident)
+
+        # If wrong user input occured, then we should give way to give input again
+        additional_info.update(b2s_args = {
+            "back_to": "tests_scene",
+            "step": 10,
+            "identification": str(ident)
+        })
+        additional_info.update(dataFor = 3)
+        await self.wizard.update_data(additional_info = additional_info)
+
+        try:
+            check = check_utils.Checking(text)
+            if check.clear_scopes() != "[]":
+                raise ValueError
+            check.split_str_to_list()
+            check.list_to_int()
+            if len(check.data) != 2 or check.data[0] > check.data[1]:
+                raise ValueError
+        except ValueError:
+            return await error_occured(message, "wi")
+        scene_data, test_id, limits = await self.get_common_db_data(
+            "modif"
+        )
+        if ident < 0 or ident >= len(limits):
+            return await error_occured(callback.message, "wu")
+        var_limit = limits[ident]
+        if check.data[0] == check.data[1] and var_limit[0][1:] == 'c':
+            if check.data[0] in var_limit[3]:
+                return await error_occured(message, "wi")
+        var_limit[1], var_limit[2] = check.data[0], check.data[1]
+        limits[ident] = var_limit
+        cur.execute("""
+            UPDATE
+                tests_table
+            SET
+                modif = :limits
+            WHERE
+                testID == :testID
+        """, {"testID": test_id, "limits": limits})
+
+        additional_info.update(dataFor = 10)
+        await self.wizard.update_data(additional_info = additional_info)
+        kb = [[types.InlineKeyboardButton(
+            text = "Продолжить",
+            callback_data = "teacher_tests_values"
+        )]]
+        keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
+
+        await bot.send_message(
+            text = "Готово.",
+            chat_id = message.chat.id,
+            reply_markup = keyboard
+        )
+
+    @on.callback_query(F.data[:24] == "teacher_tests_values_add")
+    @flags.permission("teacher")
+    async def create_settings_redirect(self, callback: types.CallbackQuery):
+        scene_data = (await self.wizard.get_data())["scene_data"]
+        action = callback.data[24:]
+        scene_data.update(test_action = "create_new")
+        scene_data.update(exit_earlier = True)
+        await self.wizard.update_data(scene_data = scene_data)
+        if action == "t":
+            return await self.wizard.goto(
+                "collproblems_scene",
+                entered_step = 1
+            )
+        scene_data.update(test_action = "modify_collprob")
+        await self.wizard.update_data(scene_data = scene_data)
+        return await self.wizard.goto(
+                "collproblems_scene",
+                entered_step = 4
+            )
+
+    # This function is being started from `on_enter` only
+    async def create_final(self, message: types.Message):
+        scene_data = (await self.wizard.get_data())["scene_data"]
+        additional_info = (await self.wizard.get_data())["additional_info"]
+
+        test_id = scene_data["test_id"]
+        sel_options = scene_data["selected_options"].tolist()
+        dedicated_time = scene_data["dedicated_time"]
+        collprob_name = scene_data["name"]
+
+        #####################################################################################
+        '''for i in range(len(classes_ids)):
+            old_tests_ids = []
+            if not scene_data["exit_earlier"]:
+                old_tests_ids = cur.execute("""
+                    SELECT
+                        testsID
+                    FROM
+                        collections_table
+                    WHERE
+                        rowid == ?""",
+                [collprobs_ids[i]]).fetchall()'''
+        ##############################################################################################
+
+        if scene_data["test_action"] == "modify_collprob":
+            for i in sel_options:
+                tests_ids = cur.execute("""
+                    SELECT
+                        testsIDs
+                    FROM
+                        collections_table
+                    WHERE
+                        rowid == ?
+                """, [i]).fetchone()[0] + test_id
+                cur.execute("""
+                    UPDATE
+                        collections_table
+                    SET
+                        testsIDs == ?
+                    WHERE
+                        rowid == ?
+                """, [tests_ids, i])
+        else:
+            cur.execute("""
+                INSERT INTO
+                    collections_table
+                VALUES
+                   (:classesIDs,
+                    :testsIDs,
+                    :timeCompl,
+                    :creationDate,
+                    :name,
+                    :teacherID)
+            """, {
+                "classesIDs":   list(map(int, sel_options)),
+                "testsIDs":     [test_id],
+                "timeCompl":    dedicated_time,
+                "creationDate": datetime.today(),
+                "name":         collprob_name,
+                "teacherID":    message.from_user.id
+            })
+        db.commit()
+
+        kb = [[types.InlineKeyboardButton(
+            text = "Вернуться",
+            callback_data = "menu_callback_redirect"
+        )]]
+        keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
+        return await bot.send_message(
+            text = "Готово. Тест был добавлен",
+            chat_id = message.chat.id,
+            reply_markup = keyboard
+        )
 
     @on.callback_query(F.data == "solve")
     @flags.permission("all")
-    async def solve(self, callback: types.CallbackQuery, ident = '1'):
+    async def solve(self, callback: types.CallbackQuery):
         scene_data, test_id, path, limits, done_by = await self.get_common_db_data(
-            callback, "path", "modif", "doneBy"
+            "path", "modif", "doneBy"
         )
         data_tests = await self.get_test_value(path)
 
@@ -812,24 +929,24 @@ string.ascii_letters[ident]
             msg = msg.replace( f"<{i}>", str(test_values[-1]) )
         additional_info = (await self.wizard.get_data())["additional_info"]
         additional_info.update(b2s_args={
-            "back_to": "TestsScene",
+            "back_to": "tests_scene",
             "step": 8
         })
-        additional_info.update(dataFor=3)
-        scene_data.update(test_values=test_values)
+        additional_info.update(dataFor = 3)
+        scene_data.update(test_values = test_values)
         await self.wizard.update_data(additional_info = additional_info)
-        await self.wizard.update_data(scene_data=scene_data)
+        await self.wizard.update_data(scene_data = scene_data)
 
-        msg = "Решение задачи №"+ident+"\n(Если получилось дробное " + \
-              "число, то его необходимо округлить до двух знаков после запятой):\n"+\
-              msg
+        msg = f"""Решение задачи №{scene_data.get('collprob_step', 0)}
+(Если получилось дробное число, то его необходимо округлить до двух знаков после \
+точки):\n{msg}"""
         await callback.message.edit_text(msg)
 
     # This function is being started from `on_enter` only
     # This function is being called by message_redirect in main.py
-    async def check_solving(self, message: types.Message, ident = '1'):
+    async def check_solving(self, message: types.Message):
         scene_data, test_id, path, done_by = await self.get_common_db_data(
-            message, "path", "doneBy"
+            "path", "doneBy"
         )
         additional_info = (await self.wizard.get_data())["additional_info"]
 
@@ -843,7 +960,7 @@ string.ascii_letters[ident]
             await error_occured(message, "wu")
             return
 
-        # If we are using division, in answer we will round it to 2 numbers after comma
+        # If we are using division, round it to 2 numbers after comma before answer
         for_exec = "di=lambda x:int(x)if str(x)[-2:]=='.0'else round(x,ndigits=2);"
 
         for i in range(len(test_values)):
@@ -852,27 +969,36 @@ string.ascii_letters[ident]
         for_exec += command
         local_context = {}
         exec(for_exec, local_context)
-        result = local_context["ans"] == additional_info["text"]
+        result = additional_info["text"] in local_context["ans"]
+
+        if redirect_after_solving == "create_preview":
+            callback_to = "redirect_to_create_preview"
+        elif redirect_after_solving == "collprob_continue":
+            done_by[message.from_user.id] = result
+            cur.execute("""
+                UPDATE
+                    tests_table
+                SET
+                    doneBy = ?
+                WHERE
+                    testID == ?
+            """, [done_by, test_id])
+            db.commit()
+            callback_to = "redirect_to_next_test"
+        elif redirect_after_solving == "teacher_collprob_continue": ############
+            callback_to = "redirect_to_next_test"
+            
         if result:
             result = "верно."
         else:
             result = f"неверно.\nВерным ответом было \"{local_context['ans']}\""
-
-        if redirect_after_solving == "create_preview":
-            callback_to = "redirect_to_create_preview"
-
-        elif redirect_after_solving == "teacher_tests_view":   #############################
-            callback_to = f"teacher_tests_view_{test_id}"           #############################
-        elif redirect_after_solving == "student_tests_list":   #############################
-            cur.execute("UPDATE tests_table SET doneBy = ? WHERE testID == ?", ##################
-                        [done_by+[message.from_user.id], test_id])  #############################
-            db.commit()  #################################
-            callback_to = "student_tests_list"                      #############################
-
-        kb = [[types.InlineKeyboardButton(text = "Продолжить",
-                    callback_data = callback_to)]]
+        kb = [[types.InlineKeyboardButton(
+            text = "Продолжить",
+            callback_data = callback_to
+        )]]
         keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
-        msg = f"Решение задачи №{ident}:\nРешено - "+result
+        msg = f"""Решение задачи №{scene_data.get('collprob_step', 0)}:
+Решено - {result}"""
 
         await bot.send_message(
             text = msg,
@@ -884,28 +1010,207 @@ string.ascii_letters[ident]
     @flags.permission("teacher")
     async def redirect_to_create_preview(self, callback: types.CallbackQuery):
         scene_data, test_id, path = await self.get_common_db_data(
-            callback, "path"
+            "path"
         )
         cur.execute("DELETE FROM tests_table WHERE testID == ?", [test_id])
         db.commit()
         ident = list((await self.get_test_value(path[:-1])).values())
         ident = ident.index(await self.get_test_value(path))
         path = path[:-1]
-        scene_data.update(path=path)
-        await self.wizard.update_data(scene_data=scene_data)
-        return await self.create_preview(callback=callback, ident=ident)
+        scene_data.update(path = path)
+        await self.wizard.update_data(scene_data = scene_data)
+        return await self.create_preview(callback = callback, ident = ident)
+
+
+    # Students functions
+    @on.callback_query(F.data == "redirect_to_next_test")
+    @flags.permission("student")
+    async def redirect_student_to_next_test(self, callback: types.CallbackQuery):
+        scene_data = (await self.wizard.get_data())["scene_data"]
+        collprob = cur.execute("""
+            SELECT
+                testsIDs, name
+            FROM
+                collections_table
+            WHERE
+                rowid == ? AND
+                DATE('NOW', 'START OF DAY') <=
+                    DATE(creationDate, CONCAT('+', timeCompl, ' DAY'))
+            ORDER BY
+                creationDate DESC
+        """, [scene_data["collprob_rowid"]]).fetchone()
+
+        if () == collprob:
+            return await error_occured(callback, "wu")
+
+        if len(collprob[0]) <= scene_data["collprob_step"]:
+            msg = "Готово! Все задачи в этом сборнике были решены."
+            kb = [[types.InlineKeyboardButton(
+                text = "Продолжить",
+                callback_data = "menu_callback_redirect"
+            )]]
+            keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
+            return await callback.message.edit_text(
+                text = msg,
+                reply_markup = keyboard
+            )
+
+        scene_data.update(test_id = collprob[scene_data["collprob_step"]])
+        scene_data.update(collprob_step = scene_data["collprob_step"] + 1)
+        return await self.solve(callback)
+
+    # This function is being started from `on_enter` only
+    async def student_list(self, callback: types.CallbackQuery):
+        scene_data = (await self.wizard.get_data())["scene_data"]
+        fetch = cur.execute("""
+            SELECT
+                studentsID, classID
+            FROM
+                classes_table
+        """).fetchall()
+        classes = []
+        for i in fetch:
+            if callback.from_user.id in i[0]:
+                classes.append(int(i[1]))
+        classes = set(classes)
+
+        fetch = cur.execute("""
+            SELECT
+                classIDs, name, rowid, testsIDs
+            FROM
+                collections_table
+            WHERE
+                DATE('NOW', 'START OF DAY') <=
+                    DATE(creationDate, CONCAT('+', timeCompl, ' DAY'))
+            ORDER BY
+                creationDate DESC
+        """).fetchall()
+
+        # Getting all collprobs data where user is not in <doneBy> column
+        pages = []
+        collprobs_rowids = []
+        for i in range(len(fetch)):
+            inters_col_class = classes & set(map(int, fetch[i][0]))
+            # If classes has same objects then proceed
+            if len(inters_col_class) > 0:
+                done_by = cur.execute(
+                    "SELECT doneBy FROM tests_table WHERE testID == ?",
+                    [fetch[i][3][-1]]
+                ).fetchone()[0]
+                if str(callback.from_user.id) in done_by.keys():
+                    continue
+
+                name = cur.execute(
+                    "SELECT name FROM classes_table WHERE classID == ?",
+                    [inters_col_class.pop()]
+                ).fetchone()[0]
+                pages.append(types.InlineKeyboardButton(
+                    text = f"({name}) {fetch[i][1]}",
+                    callback_data = f"back_to_scene{fetch[i][2]}"
+                ))
+                collprobs_rowids.append(fetch[i][2])
+        scene_data.update(collprobs_rowids = collprobs_rowids)
+        if len(pages) == 0:
+            await error_occured(callback.message, "wu")
+            return
+
+        await self.wizard.update_data(scene_data = scene_data)
+
+        return await PagedView(event = self.wizard.event,
+            permission = "student",
+            function_name = "test_student_list",
+            pages = pages,
+            mainmenu_text = "Невыполненные задания:",
+            back_to = "menu_callback_redirect",
+            forward_to = None,
+            arguments = {"back_to": "tests_scene", "step": 12}
+        ).handle(state = self.wizard.state)
+
+    # This function is being started from `on_enter` only
+    async def student_tests_rsolve(self, callback: types.CallbackQuery, ident: str):
+        scene_data = (await self.wizard.get_data())["scene_data"]
+        if int(ident) not in scene_data["collprobs_rowids"]:
+            return await error_occured(callback, "wu")
+        collprob = cur.execute("""
+            SELECT
+                testsIDs, name, creationDate,
+                STRFTIME(
+                    '%j %R',
+                    UNIXEPOCH(creationDate) + timeCompl*86400 -
+                        UNIXEPOCH('NOW', 'LOCALTIME'),
+                    'UNIXEPOCH'
+                )
+            FROM
+                collections_table
+            WHERE
+                rowid == ? AND
+                DATE('NOW', 'START OF DAY') <=
+                    DATE(creationDate, CONCAT('+', timeCompl, ' DAY'))
+            ORDER BY
+                creationDate DESC
+        """, [int(ident)]).fetchone() # Don't forget to -1 day
+        if () == collprob:
+            return await error_occured(callback, "wu")
+
+        kb = [[types.InlineKeyboardButton(
+            text = "Вернуться",
+            callback_data = "menu_callback_redirect"
+        )]]
+
+        fetch = cur.execute(
+            "SELECT doneBy FROM tests_table WHERE testID == ?",
+            [collprob[0][0]]
+        ).fetchone()
+        if callback.from_user.id in fetch[0]:
+            keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
+            return await callback.message.edit_text(
+                text = "Вы уже решили этот сборник задач.",
+                reply_markup = keyboard
+            )
+
+        scene_data.update(redirect_after_solving = "collprob_continue")
+        scene_data.update(collprob_rowid = int(ident))
+        scene_data.update(collprob_step = 1)
+        scene_data.update(test_id = int(collprob[0][0]))
+        await self.wizard.update_data(scene_data = scene_data)
+        kb = [[types.InlineKeyboardButton(
+                text = "Решить",
+                callback_data = "solve"
+            )]] + kb
+        keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
+        msg = f"{collprob[1]}\nОт {collprob[2]}\n\nНа решение остал"
+        time = collprob[3].lstrip('0').split()
+        if len(time) != 1:
+            time[0] = int(time[0]) - 1
+            if time[0] % 10 == 1 and time[0] % 100 != 11:
+                msg += f"ся {time[0]} день"
+            msg += "ось "
+            if time[0]%10>=2 and time[0]%10<5 and(time[0]%100<11 or time[0]%100>14):
+                msg += f"{time[0]} дней "
+            else:
+                msg += f"{time[0]} дней "
+        else:
+            msg += "ось "
+        msg += time[-1]
+
+        await callback.message.edit_text(
+            text = msg,
+            reply_markup = keyboard
+        )
 
 
 @router.callback_query(F.data == "tests_manage")
 @flags.permission("teacher")
 async def tests_manage(callback: types.CallbackQuery, scenes: ScenesManager,
-            state: FSMContext) -> None:
+        state: FSMContext) -> None:
     await scenes.close()
-    await scenes.enter(TestsScene)
+    await state.update_data(scene_data = {})
+    await scenes.enter("tests_scene")
 
-@router.callback_query(F.data == "tests_complete")
+@router.callback_query(F.data == "tests_list")
 @flags.permission("student")
 async def tests_complete(callback: types.CallbackQuery, scenes: ScenesManager,
-            state: FSMContext) -> None:
+        state: FSMContext) -> None:
     await scenes.close()
-    await scenes.enter(TestsScene)
+    await state.update_data(scene_data = {})
+    await scenes.enter("tests_scene")

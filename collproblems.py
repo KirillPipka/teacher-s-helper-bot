@@ -1,11 +1,12 @@
 # Short name of `collection of problems` is `colProb`
 
-from utils import cur, db, bot, error_occured
-from aiogram.fsm.context import FSMContext
-from aiogram import types, F, Router
 from datetime import datetime
-from aiogram import flags
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.scene import Scene, ScenesManager, on
+from aiogram import types, F, Router, flags
 import numpy as np
+from utils import cur, db, bot, error_occured
+from paged_view import PagedView
 import logging
 
 router = Router()
@@ -13,170 +14,398 @@ router = Router()
 # Teacher functions to make collections of problems
 
 
-@router.callback_query(F.data[:22] == "teacher_colprob_create")
-@flags.permission("teacher")
-async def teacher_colprob_create_1(callback: types.CallbackQuery,
-                                   state: FSMContext) -> None | int:  # Добавить меню, как из teacher_tests_control
-    fetch = np.array(cur.execute("""SELECT classID, name FROM classes_table WHERE
-                teacherID == ?""", [callback.from_user.id]).fetchall(), dtype="<U21")
-    additional_info = (await state.get_data())["additional_info"]
-    # Checks
-    if additional_info["dataFor"] != 6:
-        selected = np.array([callback.data[22:]], dtype="<U21")
-    else:
-        selected = np.array([*additional_info["selected"]+callback.data[22:]],
-                            dtype="<U21")
-    if int(callback.data[22:]) != 0 and int(callback.data[22:]) not in fetch[:, 0]:
-        await error_occured("e")
-        callback.data = "teacher_colprob_create0"
-        await teacher_colprob_class(callback, state)
-        return -1
-    
-    # Mark selected
-    select_map = np.isin(fetch[:, 0], selected)
-    fetch[select_map, 1] = [i.upper()+" (ВЫБРАН)" for i in fetch[select_map, 1]]
-    # Buttons
-    for i in range(len(fetch)):
-        kb.append([types.InlineKeyboardButton(text = fetch[i, 1],
-                    callback_data = f"teacher_colprob_create{fetch[i, 0]}")])
-    kb += [[types.InlineKeyboardButton(text = "Отмена",
-                                       callback_data = "menu_callback_redirect")]]
-    kb += [[types.InlineKeyboardButton(text = "Дальше",
-                                       callback_data = "teacher_colprob_create_1")]]# Добавить клавиатуру и изменить оптимизацию
-    keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
+class ColproblemsScene(Scene, state = "collproblems_scene"):
+    @on.callback_query.enter()
+    async def on_enter_callback(self, callback: types.CallbackQuery,
+            entered_step: int = 0, identification: str = ''):
+        if (await self.wizard.get_data())["logged_as"] == 1:
+            match entered_step:
+                case 1:
+                    return await self.create_0(
+                        callback = callback,
+                        ident = identification
+                    )
+                case 4:
+                    return await self.view(
+                        callback = callback,
+                        ident = identification
+                    )
+                case 5:
+                    return await self.edit(
+                        callback = callback,
+                        ident = identification
+                    )
+        elif (await self.wizard.get_data())["logged_as"] == 0:
+            return#######################
+            
 
-    await state.update_data(additional_info = {"dataFor": 6,
-                                               "selected": selected.tolist()})
-    await callback.message.edit_text("Создание сборника задач.\nВыберите классы,"\
-                                      " к которым будет добален сборник:",
-                                     reply_markup = keyboard)
+    @on.message.enter()
+    async def on_enter_message(self, message: types.Message,
+            entered_step: int = 0, identification: str = ''):
+        if (await self.wizard.get_data())["logged_as"] == 1:
+            match entered_step:
+                case 2:
+                    return await self.create_2(
+                        message = message
+                    )
+                case 3:
+                    return await self.create_3(
+                        message = message
+                    )
 
-@router.callback_query(F.data == "teacher_colprob_create_1")
-@flags.permission("teacher")
-async def teacher_colprob_create_1_comfirm(callback: types.CallbackQuery,
-                                           state: FSMContext) -> None | int:
-    kb = [[types.InlineKeyboardButton(text = "Отмена",
-                                      callback_data = "menu_callback_redirect")]]
-    keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
-    msg = """Создание сборника задач.
-Введите название(по умолчанию берётся дата создания):
+        elif (await self.wizard.get_data())["logged_as"] == 0:
+            return##################
+        else:
+            return
+
+    # This function is being started from `on_enter` only
+    async def create_0(self, callback: types.CallbackQuery, ident: str):
+        scene_data = (await self.wizard.get_data())["scene_data"]
+        additional_info = (await self.wizard.get_data())["additional_info"]
+        if ident == '-1':
+            return await self.create_1(
+                callback = callback
+            )
+        fetch = np.array(cur.execute("""
+            SELECT
+                classID,
+                name
+            FROM
+                classes_table
+            WHERE
+                teacherID == ?
+            """, [callback.from_user.id]
+        ).fetchall(), dtype="<U21")
+
+        # Creating mask for already marked options and new one
+        if ident == '':
+            msg = """Выберите классы, к которым нужно добавить задание
+(Если ещё не знаете, к каким классам хотите добавить задания - нажмите "пропустить")"""
+            selected = np.array([], dtype = "<U21")
+        else:
+            msg = "Выберите классы, к которым нужно добавить задание"
+            selected = np.append(scene_data["selected_options"], int(ident))
+
+        scene_data.update(selected_options = selected)
+        additional_info.update(dataFor = 2)     # Empty dataFor to recreate pages
+        await self.wizard.update_data(scene_data = scene_data)
+        await self.wizard.update_data(additional_info = additional_info)
+
+        ############ understand what it means and rewrite ##############################
+        #if int(callback.data[22:]) != 0 and int(callback.data[22:]) not in fetch[:, 0]:
+        #    await error_occured("e")
+        #    callback.data = "teacher_colprob_create0"
+        #    await teacher_colprob_class(callback, state)
+        #    return -1
+
+        # Marking fetch entries using previously created mask
+        select_map = np.isin(fetch[:, 0], selected)
+        fetch[select_map, 1] = [i.upper()+" (ВЫБРАН)" for i in fetch[select_map, 1]]
+
+        pages: list[types.InlineKeyboardButton, ...] = []
+        for i in range(len(fetch)):
+            pages.append(types.InlineKeyboardButton(
+                text = str(fetch[i, 1]),
+                callback_data = f"back_to_scene{fetch[i, 0]}"
+            ))
+
+        # Using keyboard builder
+        return await PagedView(event = self.wizard.event,
+            permission = "teacher",
+            function_name = "colproblems_create_0",
+            pages = pages,
+            mainmenu_text = msg,
+            back_to = "menu_callback_redirect",
+            forward_to = "back_to_scene-1",
+            arguments = {"back_to": "collproblems_scene", "step": 1}
+        ).handle(state = self.wizard.state)
+
+    # This function is being started from `on_enter` only
+    async def create_1(self, callback: types.CallbackQuery):
+        scene_data = (await self.wizard.get_data())["scene_data"]
+        additional_info = (await self.wizard.get_data())["additional_info"]
+        additional_info.update(dataFor = 3)
+        additional_info.update(b2s_args = {
+            "back_to": "collproblems_scene",
+            "step": 2
+        })
+        await self.wizard.update_data(scene_data = scene_data)
+        await self.wizard.update_data(additional_info = additional_info)
+        kb = [[types.InlineKeyboardButton(
+            text = "Отмена",
+            callback_data = "menu_callback_redirect"
+        )]]
+        keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
+        msg = """Создание сборника задач.
+Введите название сборника(по умолчанию берётся дата создания):
 Чтобы взять значение по умолчанию, отправьте любой символ."""
-    await bot.send_message(text = msg,
-                           chat_id = message.chat.id,
-                           reply_markup = keyboard)
+        return await callback.message.edit_text(
+            text = msg,
+            reply_markup = keyboard
+        )
 
+    # This function is being started from `on_enter` only
+    async def create_2(self, message: types.Message):
+        scene_data = (await self.wizard.get_data())["scene_data"]
+        additional_info = (await self.wizard.get_data())["additional_info"]
+        name = additional_info["text"]
 
-"""==============================================================================="""
-async def _old_teacher_colprob_create_1(message: types.Message,
-                                        state: FSMContext) -> None | int:
-    additional_info = (await state.get_data())["additional_info"]
-    if additional_info["dataFor"] != 5:
-        return -2
+        kb = [[types.InlineKeyboardButton(
+            text = "Отмена",
+            callback_data = "menu_callback_redirect"
+        )]]
+        keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
 
-    kb = [[types.InlineKeyboardButton(text = "Вернуться",
-                                      callback_data = "menu_callback_redirect")]]
-    keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
-    name = additional_info["name"]
+        # Ask user to try again
+        additional_info.update(dataFor = 3)
+        additional_info.update(b2s_args = {
+            "back_to": "collproblems_scene",
+            "step": 2
+        })
+        await self.wizard.update_data(additional_info = additional_info)
 
-    avalliable_class = cur.execute("""SELECT classID FROM classes_table
-                                    WHERE name == ? LIMIT 1""", [name]).fetchall()
-    if avalliable_class == ():
-        await callback.message.edit_text("Класс с таким названием недоступен или"\
-                                          " не существует\nПопробуйте другое",
-                                         chat_id = message.chat.id,
-                                         reply_markup = keyboard)
-        return
-    await state.update_data(additional_info={"dataFor": 6,
-                                             "selected":additional_info["selected"],
-                                             "classID": int(avalliable_class[0][0])})
+        if len(name) == 1:
+            name = datetime.today().strftime("%H:%M %d.%m.%y")
+        elif len(name) > 20:
+            return await bot.send_message(
+                text = """Имя слишком длинное(максимум 20 символов)
+Попробуйте другое""",
+                chat_id = message.chat.id,
+                reply_markup = keyboard
+            )
+        elif len(name) < 5:
+            return await bot.send_message(
+                text = """Имя слишком короткое(минимум 5 символов
+Попробуйте другое""",
+                chat_id = message.chat.id,
+                reply_markup = keyboard
+            )
 
-    msg = """Создание сборника задач.
-Введите название(по умолчанию берётся дата создания):
-Чтобы взять значение по умолчанию, отправьте любой символ."""
-    await bot.send_message(text = msg,
-                           reply_markup = keyboard)
-"""==============================================================================="""
-
-
-@router.callback_query(F.data == "teacher_colprob_create_2")
-@flags.permission("teacher")
-async def teacher_colprob_create_2(message: types.Message,
-                                   state: FSMContext) -> None | int:
-    additional_info = (await state.get_data())["additional_info"]
-    if additional_info["dataFor"] != 6:
-        return -2
-
-    kb = [[types.InlineKeyboardButton(text = "Отмена",
-                                      callback_data = "menu_callback_redirect")]]
-    keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
-
-    # Required data
-    name = additional_info["text"]
-    class_id = additional_info["classID"]
-    class_name = cur.execute("SELECT name FROM collections_table WHERE classID == ?",
-                             [class_id]).fetchall()
-    class_name = [i[0][0] for i in class_name]
-
-    if len(name) == 1:
-        name = datetime.today()
-    elif len(name) > 20:
-        await bot.send_message(text = "Имя слишком длинное(максимум 20 символов)\n"\
-                                "Попробуйте другое",
-                               chat_id = message.chat.id,
-                               reply_markup = keyboard)
-        return
-    elif name < 5:
-        await bot.send_message(text = "Имя слишком короткое(минимум 5 символов)\n"\
-                                "Попробуйте другое",
-                               chat_id = message.chat.id,
-                               reply_markup = keyboard)
-        return
-    elif name in class_name:
-        await bot.send_message(text = "Это имя уже используется в этом классе\n"\
-                                "Попробуйте другое",
-                               chat_id = message.chat.id,
-                               reply_markup = keyboard)
-        return
-    await state.update_data(additional_info={"dataFor":  7,
-                                             "selected": additional_info["selected"],
-                                             "classID":  additional_info["classID"],
-                                             "name":     name})
-    msg = """Создание сборника задач.
-Введите время выполнения(по умолчанию одна неделя), время можно указать \
-в днях(Д) и неделях(Н):
+        additional_info.update(b2s_args = {
+            "back_to": "collproblems_scene",
+            "step": 3
+        })
+        scene_data.update(name = name)
+        await self.wizard.update_data(additional_info = additional_info)
+        await self.wizard.update_data(scene_data = scene_data)
+        msg = """Создание сборника задач.
+Введите время выполнения(по умолчанию одна неделя, для этого отправьте один символ)\
+, время можно указать в днях(Д) и неделях(Н):
 Принимается формат [число]Д или [число]Н"""
-    await bot.send_message(text = msg,
-                           chat_id = message.chat.id,
-                           reply_markup = keyboard)
+        return await bot.send_message(
+            text = msg,
+            chat_id = message.chat.id,
+            reply_markup = keyboard
+        )
+
+    # This function is being started from `on_enter` only
+    async def create_3(self, message: types.Message):
+        additional_info = (await self.wizard.get_data())["additional_info"]
+        scene_data = (await self.wizard.get_data())["scene_data"]
+        text = additional_info["text"]
+        msg = "Выберите задачи, которые необходимо добавить в сборник."
+
+        if text[-1] == 'Н':
+            days = 7
+        elif text[-1] == 'Д':
+            days = 1
+        else:
+            days = 1
+            msg = """Вы не указали измерение времени - в днях(Д) или неделях(Н).
+Автоматически выбирается измерение в днях.\n""" + msg
+
+        if len(text) == 1 and text != 'Д':
+            days = 7
+        elif text[:-1].isdigit():
+            days *= int(text[:-1])
+        elif text.isdigit():
+            days *= int(text)
+        elif len(text) != 1:
+            # Try again
+            additional_info.update(dataFor = 3)
+            additional_info.update(b2s_args = {
+                "back_to": "collproblems_scene",
+                "step": 3
+            })
+            return await error_occured(message, "wi")
+
+        scene_data.update(dedicated_time = days)
+        await self.wizard.update_data(scene_data = scene_data)
+
+        if scene_data.get("exit_earlier"):
+            return await self.wizard.goto(
+                "tests_scene",
+                entered_step = 11
+            )
+
+        kb = [[types.InlineKeyboardButton(
+            text = "Отмена",
+            callback_data = "menu_callback_redirect"
+        )]]
+        keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
+
+        return await bot.send_message(
+            text = msg,
+            chat_id = message.chat.id,
+            reply_markup = keyboard
+        )
+
+    @on.callback_query(F.data == "view")
+    @flags.permission("teacher")
+    async def view(self, callback: types.CallbackQuery, ident: str = ''):
+        pages = []
+        size = max(map(lambda x: x[0], cur.execute(
+            "SELECT LENGTH(name) FROM collections_table WHERE teacherID == ?",
+            [callback.from_user.id]
+        ).fetchall())) + 10
+        fetch = np.array(cur.execute("""
+            SELECT
+                rowid,
+                name
+            FROM
+                collections_table
+            WHERE
+                teacherID == ?
+            ORDER BY
+                rowid ASC
+        """, [callback.from_user.id]).fetchall(), dtype = [("f0", np.int32), ("f1", f"<U{size}")])
+        scene_data = (await self.wizard.get_data())["scene_data"]
+        additional_info = (await self.wizard.get_data())["additional_info"]
+
+        if len(fetch.shape) == 0:
+            return await error_occured(callback.message, "wu")
+
+        # Creating mask for already marked options and new one
+        if ident == '':
+            selected = np.array([], dtype = np.int32)
+        else:
+            selected = np.append(scene_data["selected_options"], int(ident))
+
+        scene_data.update(selected_options = selected)
+        additional_info.update(dataFor = 2)     # Empty dataFor to recreate pages
+        await self.wizard.update_data(scene_data = scene_data)
+        await self.wizard.update_data(additional_info = additional_info)
+
+        # Marking fetch entries using previously created mask
+        select_map = np.isin(fetch['f0'], selected)
+        fetch[select_map] = [(i[0], i[1].upper()+" (ВЫБРАН)") for i in fetch.take(select_map)]
+
+        for i in range(len(fetch)):
+            pages.append(types.InlineKeyboardButton(
+                text = str(fetch[i][1]),
+                callback_data = f"back_to_scene{fetch[i][0]}"
+            ))
+
+        if len(pages) == 0:
+            pages.append([types.InlineKeyboardButton(
+                text = "Создать новый сборник задач[не работает]",
+                callback_data = 'dasdas'
+            )])
+            pages.append([types.InlineKeyboardButton(
+                text = "Вернуться",
+                callback_data = "menu_callback_redirect"
+            )])
+            keyboard = types.InlineKeyboardMarkup(inline_keyboard = pages)
+            return await callback.message.edit_text(
+                text = "Похоже, здесь ещё ничего нет",
+                reply_markup = keyboard
+            )
+
+        if scene_data.get("exit_earlier"):
+            forward_to = "view_redirect"
+            entering_step = 4
+        else:
+            forward_to = None
+            entering_step = 5
+
+        return await PagedView(event = self.wizard.event,
+            permission = "teacher",
+            function_name = "collproblems_view",
+            pages = pages,
+            mainmenu_text = "Созданные вами сборники задач:",
+            back_to = "menu_callback_redirect",
+            forward_to = forward_to,
+            arguments = {"back_to": "collproblems_scene", "step": entering_step}
+        ).handle(state = self.wizard.state)
+
+    # This function is being started from `on_enter` only
+    async def edit(self, callback: types.CallbackQuery, ident: str):
+        msg = ""
+        classes = []
+        tasks_done = []
+        kb = [[types.InlineKeyboardButton(
+            text = "Вернуться",
+            callback_data = "menu_callback_redirect"
+        )]]
+        keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
+        
+        fetch = cur.execute("""
+            SELECT
+                testsIDs,
+                classIDs
+            FROM
+                collections_table
+            WHERE
+                rowid == ?
+        """, [int(ident)]).fetchone()
+        for i in fetch[1]:
+            classes.append((lambda x: (x[0], set(x[1])))(cur.execute(
+                "SELECT name, studentsID FROM classes_table WHERE classID == ?",
+                [i]
+            ).fetchone()))
+        tasks_done.append(cur.execute(
+            "SELECT doneBy FROM tests_table WHERE testID == ?",
+            [fetch[0][0]]
+        ).fetchone()[0].keys())
+        tasks_done.append(cur.execute(
+            "SELECT doneBy FROM tests_table WHERE testID == ?",
+            [fetch[0][-1]]
+        ).fetchone()[0].keys())
+
+        for i in range(len(classes)):
+            msg += f"\n\n=-=-= {classes[i][0]}\n"
+            inters = len(tasks_done[0] & classes[i][1])
+            if not inters:
+                msg += "*Работу ещё никто не начал"
+            else:
+                msg += f"*Работу начали {inters} человек и закончили "
+                msg += f"{len(tasks_done[1] & classes[i][1])}\n"
+                msg += "*(больше статистики пока недоступно)"
+
+        if classes == []:
+            msg = "Вы не добавили классы для этого сборника"
+
+        await callback.message.edit_text(
+            text = msg,
+            reply_markup = keyboard
+        )
+
+    @on.callback_query(F.data == "view_redirect")
+    @flags.permission("teacher")
+    async def view_redirect(self, callback: types.CallbackQuery):
+        scene_data = (await self.wizard.get_data())["scene_data"]
+
+        if scene_data.get("selected_options", []).size == 0:
+            pages = [[types.InlineKeyboardButton(
+                text = "Назад",
+                callback_data = "view"
+            )]]
+            keyboard = types.InlineKeyboardMarkup(inline_keyboard = pages)
+            return await callback.message.edit_text(
+                text = "Вы не выбрали ни одного сборника!",
+                reply_markup = keyboard
+            )
+
+        return await self.wizard.goto(
+            "tests_scene",
+            entered_step = 11
+        )
 
 
-async def teacher_colprob_create_3(message: types.Message,
-                                   state: FSMContext) -> None | int:
-    additional_info = (await state.get_data())["additional_info"]
-    if additional_info["dataFor"] != 7:
-        return -1
-
-    kb = [[types.InlineKeyboardButton(text = "Отмена",###########################################
-                                      callback_data = "menu_callback_redirect")]]
-    keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
-
-    # Required data
-    msg = "Выберите задачи, которые необходимо добавить в сборник."
-    text = additional_info["text"]
-
-    if text[-1] == "Н":
-        days = 7
-    elif text[-1] == "Д":
-        days = 1
-    else:
-        msg = """\nВы не указали измерение времени - в днях(Д) или неделях(Н).
-Автоматически выбирается измерение в днях.""" + msg
-    if text[:-1].isdigit():
-        days *= int(text[:-1])
-    elif len(text) != 1:
-        await error_occured(callback.message, "wi")
-        return
-
-    await bot.send_message(text = msg,
-                           chat_id = message.chat.id,
-                           reply_markup = keyboard)
+@router.callback_query(F.data == "collproblems_manage")
+@flags.permission("teacher")
+async def collproblems_manage(callback: types.CallbackQuery, scenes: ScenesManager,
+        state: FSMContext) -> None:
+    await scenes.close()
+    await state.update_data(scene_data = {})
+    await scenes.enter("collproblems_scene", entered_step = 4)

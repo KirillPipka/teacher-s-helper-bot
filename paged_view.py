@@ -17,7 +17,7 @@ class PagedView(CallbackQueryHandler):
         Required __init__ `kwargs` field with arguments
         permission   ="student"|"teacher"|"all",
         function_name=str  #handler where init was run from
-        pages        =list[list[InlineKeyboardButton]] | list[InlineKeyboardButton]
+        pages        =list[list[InlineKeyboardButton,...]] | list[InlineKeyboardButton,...]
         mainmenu_text=str
         back_to      =str  #CallbackQuery to go back to
         forward_to   =str  #CallbackQuery to go forward to(None to skip)
@@ -42,10 +42,10 @@ class PagedView(CallbackQueryHandler):
             if len(self.data["pages"]) == 0:
                 msg = "Pages could not be found in paged_view by name function"+\
                       self.data["function_name"]
-                logger.ERROR(msg)
+                logger.error(msg)
                 return await error_occured("e")
 
-            await state.update_data(additional_info={
+            await state.update_data(additional_info = {
                 "dataFor": 9,
                 "pagedview_name": self.data["function_name"],
                 "pagedview_page": 0,
@@ -59,9 +59,9 @@ class PagedView(CallbackQueryHandler):
                 self.data["pages"] = pages
 
         if self.callback_data[10:] == "F": # Forward
-            return await self.__page_change(direction="forward", state=state)
+            return await self.__page_change(direction = "forward", state = state)
         elif self.callback_data[10:] == "B": # Backward
-            return await self.__page_change(direction="backward", state=state)
+            return await self.__page_change(direction = "backward", state = state)
         else:
             return await self.__main_menu(state=state)
 
@@ -111,7 +111,7 @@ class PagedView(CallbackQueryHandler):
 
         if self.data["forward_to"] != None:
             kb.append([types.InlineKeyboardButton(
-                text = "Готово",
+                text = "Далее",
                 callback_data = self.data["forward_to"]
             )])
         kb.append([types.InlineKeyboardButton(
@@ -123,5 +123,5 @@ class PagedView(CallbackQueryHandler):
 
         await self.message.edit_text(
             self.data["mainmenu_text"],
-            reply_markup=keyboard
+            reply_markup = keyboard
         )
