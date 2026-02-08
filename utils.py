@@ -98,15 +98,15 @@ async def error_occured(data, reason, where = "unstated", *args):
                 logger.warning(f"User {user_id} gained access for"+
                     f" entering function {where} for teacher.")
             await message.reply("К сожалению, чтобы зайти в этот раздел Вам"+
-                " нужен аккаут учителя.")
+                " нужен аккаунт учителя.")
         elif reason[1] == "s": # Student only access
             if not is_both:
                 logger.warning(f"User {user_id} gained access for"+
                     f" entering function {where} for student.")
             await message.reply("К сожалению, чтобы зайти в этот раздел Вам"+
-                " нужен аккаут ученика.")
+                " нужен аккаунт ученика.")
         elif reason[1] == "n": # Not registered
-            await message.reply("Вы ещё не зарегестрированы в системе.\n"+
+            await message.reply("Вы ещё не зарегистрированы в системе.\n"+
                 "Обратитесь к администратору.")
     if reason[0] == "w": # Warn user ...
         if reason[1] == "u": # Data unavaliable

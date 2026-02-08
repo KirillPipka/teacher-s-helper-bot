@@ -8,7 +8,7 @@ import logging
 router = Router()
 logger = logging.getLogger(__name__)
 
-@router.message(Command("auth"))    # Добавить выполнение команды только администратору
+@router.message(Command("auth"))
 @flags.skip_permission_middleware("True")
 async def add_user_authorization(message: types.Message,
         command: CommandObject) -> None:

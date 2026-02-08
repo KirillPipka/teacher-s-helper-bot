@@ -1,26 +1,3 @@
-# начение времени по умоолчанию в collproblems
-# Посмотреть приём значений с минусами
-# Возможность проСМОТРЕТЬ
-
-
-# == Что ещё можно сделать:
-#     > Облегчить интерфейс
-# ~~~> Добавить время максимального выполнения задачи~~~
-# ~~~> Добавить выполнение нескольких задач подряд ( сборник задач - collection of problems[colProb] )~~~
-# > Переделать все последовательные операции в scenes для aiogram
-# > Проверять, было ли удалено сообщение в middleware
-# > Добавить сортировку по цифре и литере класса
-# > Добавить статистику
-# > i18n на Fluent
-#> Не показывать ученику задание, что он делает
-
-# == Проверки:
-# №1.Точно ли всё будет хорошо работать, если вдруг кто-то случайно запустит 2 /start ?
-# №2.Что произойдёт, если пользователь удалит сообщение бота у себя?
-
-
-
-
 from datetime import datetime
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.scene import Scene, ScenesManager, on
@@ -56,226 +33,9 @@ if fetch == []:
     max_table_id = 4
     empty_table_ids = [0, 1, 2, 3]
 else:
-    if type(fetch[-1][0]) == bytes:
-        print(fetch[-1])
-        max_table_id = 2**math.ceil(math.log2(int(fetch[-1][0][1:-1])+1))
-    else:
-        max_table_id = 2**math.ceil(math.log2(int(fetch[-1][0]+1)))
+    max_table_id = 2**math.ceil(math.log2(int(fetch[-1][0]+1)))
     empty_table_ids = list(set(range(max_table_id)) - set(i[0] for i in fetch))
 del (fetch)
-
-async def get_name_by_id(id0, id1 = None, id2 = None) -> [str,]:
-    names = []
-    names.append(list( DATA_TESTS.keys() )[int(id0)])
-    if id1 != None:
-        names.append(list( DATA_TESTS[names[0]] )[int(id1)])
-    if id2 != None:
-        names.append(list( DATA_TESTS[names[0]] \
-                                     [names[1]] )[int(id2)])
-    return names
-
-async def get_dict_by_id(id0, id1 = None, id2 = None) -> dict:
-    if id1 == None:
-        all_names = await get_name_by_id(id0)
-    elif id2 == None:
-        all_names = await get_name_by_id(id0, id1)
-        last_name1 = all_names[1]
-    else:
-        all_names = await get_name_by_id(id0, id1, id2)
-        last_name1 = all_names[1]
-        last_name2 = all_names[2]
-    last_name0 = all_names[0]
-
-    if id1 == None:
-        result_dict = DATA_TESTS[last_name0]
-    else:
-        result_dict = DATA_TESTS[last_name0][last_name1]
-    if id2 != None:
-        result_dict = DATA_TESTS[last_name0][last_name1][last_name2]
-
-    return result_dict
-
-
-
-
-# Student functions to manage tests
-
-# Teacher functions to control tests
-
-@router.callback_query(F.data[:20] == "teacher_tests_fvdel_") # f - final
-@flags.permission("teacher")
-async def teacher_tests_view_compl_del(callback: types.CallbackQuery,
-                                       state: FSMContext) -> None | int:
-    test_id = int(callback.data[20:])
-    if test_id in empty_table_ids:
-        await error_occured(callback.message, "wu")
-        return
-
-    cur.execute("DELETE FROM tests_table WHERE testID == ?", [test_id])
-    db.commit()
-    empty_table_ids = sorted(empty_table_ids + test_id)
-    
-    kb = [[types.InlineKeyboardButton(text = "Продолжить",
-                             callback_data = f"teacher_tests_control")]]
-    keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
-
-    await callback.message.edit_text("Готово.", reply_markup = keyboard)
-
-@router.callback_query(F.data[:19] == "teacher_tests_vdel_") # v - view ; del - delete
-@flags.permission("teacher")
-async def teacher_tests_view_del(callback: types.CallbackQuery,
-                                 state: FSMContext) -> None | int:
-    # Getting important data
-    test_id = int(callback.data[19:])
-
-    if test_id in empty_table_ids:
-        await error_occured(callback.message, "wu")
-        return
-
-    kb = [[types.InlineKeyboardButton(text = "НЕТ",
-                             callback_data = "teacher_tests_control")],
-          [types.InlineKeyboardButton(text = "Да",
-                             callback_data = f"teacher_tests_fvdel_{test_id}")]]
-    keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
-
-    await callback.message.edit_text("Вы точно хотите удалить данный тест?\nID: "+\
-                                     str(test_id), reply_markup = keyboard)
-
-@router.callback_query(F.data[:19] == "teacher_tests_view_")
-@flags.permission("teacher")
-async def teacher_tests_view(callback: types.CallbackQuery,
-                             state: FSMContext) -> None | int:
-    # Getting important data
-    test_id = int(callback.data[19:])
-
-    if test_id in empty_table_ids:
-        await error_occured(callback.message, "wu")
-        return
-
-    fetch = cur.execute("SELECT * FROM tests_table WHERE testID == ?", [test_id])
-    fetch = fetch.fetchall()[0]
-    path1, path2, path3 = fetch[2:5]
-    modified = fetch[5]
-    creation_date = fetch[6]
-    last_name0, last_name1, last_name2 = await get_name_by_id(path1, path2, path3)
-    class_name = cur.execute("SELECT name FROM classes_table WHERE classID == ?",
-                             [fetch[7]]).fetchall()[0][0]
-    done_by = fetch[8] #############################################################################
-    if done_by == [-1]:
-        await error_occured(callback.message, "e", teacher_tests_view)
-        return
-
-    standart_limits = []
-    for i in range(len(modified)):
-        if len(modified[i]) == 1:
-            standart_limits.append(f"{string.ascii_letters[i]} = {modified[i]}")
-        elif len(modified[i]) == 3:
-            standart_limits.append(string.ascii_letters[i]+
-                                   f" ∈ [{modified[i][1]}, {modified[i][2]}]")
-        else:
-            standart_limits.append(string.ascii_letters[i]+
-                                   f" ∈ [{modified[i][1]}, {modified[i][2]}] \\ "+
-                                   "{"+str(modified[i][3])[1:-1]+"}")
-    await state.update_data(additional_info = {"dataFor":    4,
-                                               "testID":     test_id,
-                                               "messageID":  callback.message\
-                                                             .message_id,
-                                               "solving":    1,
-                                               "redirectTo": "teacher_tests_view_"+\
-                                                             str(test_id),
-                                               "solvingAs":  0})
-
-    kb = [[types.InlineKeyboardButton(text = "Прорешать",
-                             callback_data = "teacher_tests_solve")],
-          [types.InlineKeyboardButton(text = "Удалить",
-                             callback_data = f"teacher_tests_vdel_{test_id}")],
-          [types.InlineKeyboardButton(text = "Вернуться",
-                                      callback_data = "teacher_tests_control")]]
-    keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
-
-    await callback.message.edit_text(f"Путь: {last_name0}\\{last_name1}\\" + \
-                                     f"{last_name2}\nID теста: {test_id}\n"+ \
-                                     f"Выдано классу: {class_name}\n"      + \
-                                     f"Выполнено учениками: {done_by}\n"   + \
-                                     "Выбранные настройки:\n"              + \
-                                     "\n".join(standart_limits)            + \
-                                     f"\nВремя создания: {creation_date}",
-                                     reply_markup = keyboard)
-
-@router.callback_query(F.data[:20] == "teacher_tests_cmove_")
-@flags.permission("teacher")
-async def teacher_tests_control_move(callback: types.CallbackQuery,
-                                     state: FSMContext) -> None | int:
-    additional_info = (await state.get_data())["additional_info"]
-    if additional_info["dataFor"] != 2:
-        current_page = 0
-    else:
-        current_page = additional_info["page"]
-    pages = (len(cur.execute("SELECT * FROM tests_table WHERE userID == ?",
-                             [callback.from_user.id]).fetchall())+4)//5
-    if callback.data[20] == "B":
-        current_page -= 1
-    else:
-        current_page += 1
-
-    if current_page < 0 or current_page >= pages:
-        await error_occured(callback.message, "wu")
-        return
-
-    await state.update_data(additional_info = {"dataFor": 2,
-                                               "page":    current_page})
-    await teacher_tests_control(callback, state)
-
-@router.callback_query(F.data == "teacher_tests_control")
-@flags.permission("teacher")
-async def teacher_tests_control(callback: types.CallbackQuery,
-                                state: FSMContext) -> None | int:
-    cur.execute("DELETE FROM tests_table WHERE doneBy == ? OR classID == 0", [[-1]])
-    db.commit()
-
-    additional_info = (await state.get_data())["additional_info"]
-    if additional_info["dataFor"] != 2:
-        current_page = 0
-    else:
-        current_page = additional_info["page"]
-    pages = (len(cur.execute("SELECT * FROM tests_table WHERE userID == ?",
-                             [callback.from_user.id]).fetchall())+4)//5
-
-    if current_page > pages - 1:
-        await error_occured(callback.message, "wu")
-        return
-
-    fetch = cur.execute("""SELECT path1, path2, path3, testID, classID FROM
-                         tests_table WHERE userID == ? ORDER BY creationDate DESC
-                         LIMIT 5 OFFSET ?""",
-                        [callback.from_user.id, current_page*5]).fetchall()
-    kb = []
-    for i in range(len(fetch)):
-        path = [fetch[i][0], fetch[i][1], fetch[i][2]]
-        names = await get_name_by_id(path[0], path[1], path[2])
-        class_name = cur.execute("SELECT name FROM classes_table WHERE classID == ?",
-                                 [fetch[i][4]]).fetchall()[0][0]
-        kb.append([types.InlineKeyboardButton(text    = "("+class_name+") "+names[2],
-                                        callback_data = "teacher_tests_view_"+
-                                                        str(fetch[i][3]))])
-
-    kb.append([])
-    if current_page != 0:
-        kb[-1].append(types.InlineKeyboardButton(text = "Назад",
-                                        callback_data = "teacher_tests_cmove_B"))
-    if current_page != pages - 1:
-        kb[-1].append(types.InlineKeyboardButton(text = "Вперёд",
-                                        callback_data = "teacher_tests_cmove_F"))
-    if kb[-1] == []:
-        kb.pop()
-
-    kb.append([types.InlineKeyboardButton(text = "Вернуться",
-                                 callback_data = "menu_callback_redirect")])
-    keyboard = types.InlineKeyboardMarkup(inline_keyboard = kb)
-
-    await callback.message.edit_text("Просмотр и управление созданных Вами тестов:",
-                                     reply_markup = keyboard)
-
 
 
 # Implementing new scenes from aiogram 3.22.0
@@ -839,20 +599,6 @@ but this ID is not in list. Adding this entry to the list"""
         dedicated_time = scene_data["dedicated_time"]
         collprob_name = scene_data["name"]
 
-        #####################################################################################
-        '''for i in range(len(classes_ids)):
-            old_tests_ids = []
-            if not scene_data["exit_earlier"]:
-                old_tests_ids = cur.execute("""
-                    SELECT
-                        testsID
-                    FROM
-                        collections_table
-                    WHERE
-                        rowid == ?""",
-                [collprobs_ids[i]]).fetchall()'''
-        ##############################################################################################
-
         if scene_data["test_action"] == "modify_collprob":
             for i in sel_options:
                 tests_ids = cur.execute("""
@@ -985,7 +731,7 @@ but this ID is not in list. Adding this entry to the list"""
             """, [done_by, test_id])
             db.commit()
             callback_to = "redirect_to_next_test"
-        elif redirect_after_solving == "teacher_collprob_continue": ############
+        elif redirect_after_solving == "teacher_collprob_continue":
             callback_to = "redirect_to_next_test"
             
         if result:
@@ -1148,7 +894,7 @@ but this ID is not in list. Adding this entry to the list"""
                     DATE(creationDate, CONCAT('+', timeCompl, ' DAY'))
             ORDER BY
                 creationDate DESC
-        """, [int(ident)]).fetchone() # Don't forget to -1 day
+        """, [int(ident)]).fetchone()
         if () == collprob:
             return await error_occured(callback, "wu")
 

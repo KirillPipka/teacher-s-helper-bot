@@ -36,7 +36,7 @@ class ColproblemsScene(Scene, state = "collproblems_scene"):
                         ident = identification
                     )
         elif (await self.wizard.get_data())["logged_as"] == 0:
-            return#######################
+            return
             
 
     @on.message.enter()
@@ -54,7 +54,7 @@ class ColproblemsScene(Scene, state = "collproblems_scene"):
                     )
 
         elif (await self.wizard.get_data())["logged_as"] == 0:
-            return##################
+            return
         else:
             return
 
@@ -90,13 +90,6 @@ class ColproblemsScene(Scene, state = "collproblems_scene"):
         additional_info.update(dataFor = 2)     # Empty dataFor to recreate pages
         await self.wizard.update_data(scene_data = scene_data)
         await self.wizard.update_data(additional_info = additional_info)
-
-        ############ understand what it means and rewrite ##############################
-        #if int(callback.data[22:]) != 0 and int(callback.data[22:]) not in fetch[:, 0]:
-        #    await error_occured("e")
-        #    callback.data = "teacher_colprob_create0"
-        #    await teacher_colprob_class(callback, state)
-        #    return -1
 
         # Marking fetch entries using previously created mask
         select_map = np.isin(fetch[:, 0], selected)
@@ -258,17 +251,20 @@ class ColproblemsScene(Scene, state = "collproblems_scene"):
             "SELECT LENGTH(name) FROM collections_table WHERE teacherID == ?",
             [callback.from_user.id]
         ).fetchall())) + 10
-        fetch = np.array(cur.execute("""
-            SELECT
-                rowid,
-                name
-            FROM
-                collections_table
-            WHERE
-                teacherID == ?
-            ORDER BY
-                rowid ASC
-        """, [callback.from_user.id]).fetchall(), dtype = [("f0", np.int32), ("f1", f"<U{size}")])
+        fetch = np.array(
+            cur.execute("""
+                SELECT
+                    rowid,
+                    name
+                FROM
+                    collections_table
+                WHERE
+                    teacherID == ?
+                ORDER BY
+                    rowid ASC
+            """, [callback.from_user.id]).fetchall(),
+            dtype = [("f0", np.int32), ("f1", f"<U{size}")]
+        )
         scene_data = (await self.wizard.get_data())["scene_data"]
         additional_info = (await self.wizard.get_data())["additional_info"]
 
@@ -288,7 +284,11 @@ class ColproblemsScene(Scene, state = "collproblems_scene"):
 
         # Marking fetch entries using previously created mask
         select_map = np.isin(fetch['f0'], selected)
-        fetch[select_map] = [(i[0], i[1].upper()+" (ВЫБРАН)") for i in fetch.take(select_map)]
+        np.putmask(
+            fetch['f1'],
+            select_map,
+            np.astype(fetch['f1'] + " (ВЫБРАН)", f"<U{size}")
+        )
 
         for i in range(len(fetch)):
             pages.append(types.InlineKeyboardButton(
