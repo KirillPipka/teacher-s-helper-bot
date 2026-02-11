@@ -99,15 +99,15 @@ class PagedView(CallbackQueryHandler):
         kb.append([])
 
         if current_page != 0:
-            kb[-1] = [[types.InlineKeyboardButton(
+            kb[-1] = [types.InlineKeyboardButton(
                 text = "Назад",
                 callback_data = "pagedview_B"
-            )]]
+            )]
         if current_page != len(self.data["pages"]) - 1:
-            kb[-1].append([types.InlineKeyboardButton(
+            kb[-1].append(types.InlineKeyboardButton(
                 text = "Вперёд",
                 callback_data = "pagedview_F"
-            )])
+            ))
 
         if self.data["forward_to"] != None:
             kb.append([types.InlineKeyboardButton(
