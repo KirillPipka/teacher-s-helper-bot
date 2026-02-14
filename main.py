@@ -19,6 +19,7 @@ class UserInfo(StatesGroup):
     logged_as = State()
     additional_info = State()
     scene_data = State()
+    util_data = State()
 
 dp = Dispatcher()
 logger = logging.getLogger(__name__)
@@ -74,6 +75,7 @@ async def menu_start_redirect(message: types.Message, state: FSMContext,
     await state.set_state(UserInfo.logged_as)
     await state.set_state(UserInfo.additional_info)
     await state.set_state(UserInfo.scene_data)
+    await state.set_state(UserInfo.util_data)
     await state.update_data(additional_info = {
         "dataFor": 0,
         "text": ""
