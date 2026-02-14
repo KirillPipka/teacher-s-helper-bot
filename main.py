@@ -1,21 +1,12 @@
-#
-# Exit codes: -1 -invalid authorization
-#             -2 -invalid data
-#(Change to normal https request statuses)
-
-
 from aiogram.filters.command import Command, CommandStart, CommandObject
-from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.scene import SceneRegistry, ScenesManager
 from aiogram.utils.deep_linking import decode_payload, create_start_link
-from aiogram import Bot, Dispatcher, types, F, flags
+from aiogram import Dispatcher, types, F, flags
 from datetime import datetime
-from types import NoneType
 import logging
 import asyncio
-import json
 import sys
 from permission_middleware import PermissionMiddleware
 from utils import cur, db, bot, error_occured
@@ -28,6 +19,7 @@ class UserInfo(StatesGroup):
     logged_as = State()
     additional_info = State()
     scene_data = State()
+    util_data = State()
 
 dp = Dispatcher()
 logger = logging.getLogger(__name__)
@@ -83,6 +75,7 @@ async def menu_start_redirect(message: types.Message, state: FSMContext,
     await state.set_state(UserInfo.logged_as)
     await state.set_state(UserInfo.additional_info)
     await state.set_state(UserInfo.scene_data)
+    await state.set_state(UserInfo.util_data)
     await state.update_data(additional_info = {
         "dataFor": 0,
         "text": ""
